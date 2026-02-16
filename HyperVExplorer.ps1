@@ -5,16 +5,6 @@
 # Requires:  PowerShell 5.1+, WinRM enabled on target Hyper-V hosts
 # =============================================================================================================
 
-# ---- Self-elevate to Administrator if not already ----
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-    [Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    # Use EncodedCommand to handle paths with special characters (e.g. # in folder names)
-    $scriptPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
-    $cmd = "Set-Location '$([System.IO.Path]::GetDirectoryName($scriptPath))'; & '$scriptPath'"
-    $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($cmd))
-    Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded"
-    exit
-}
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
