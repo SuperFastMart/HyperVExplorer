@@ -1,9 +1,16 @@
 # =============================================================================================================
 # Script:    HyperVExplorer.ps1
-# Version:   1.1
+# Version:   1.2
 # Purpose:   WPF GUI tool for remote Hyper-V inventory collection across multiple hosts
 # Requires:  PowerShell 5.1+, WinRM enabled on target Hyper-V hosts
 # =============================================================================================================
+
+# ---- Self-elevate to Administrator if not already ----
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    exit
+}
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -95,7 +102,7 @@ Add-Type -AssemblyName WindowsBase
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="&#xE7F4; HyperV Explorer" FontSize="20" FontWeight="SemiBold"
                            Foreground="{StaticResource AccentBlue}" VerticalAlignment="Center"/>
-                <TextBlock Grid.Column="2" Text="v1.1" FontSize="12"
+                <TextBlock Grid.Column="2" Text="v1.2" FontSize="12"
                            Foreground="{StaticResource FgSubtle}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
