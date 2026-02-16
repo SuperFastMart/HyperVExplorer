@@ -300,30 +300,27 @@ function Show-CredentialDialog {
     $credBtnOK    = $CredWindow.FindName("btnOK")
     $credBtnCancel = $CredWindow.FindName("btnCancel")
 
-    $script:CredResult = $null
-
     $credBtnOK.Add_Click({
-        $user = $credTxtUser.Text.Trim()
-        $pass = $credTxtPass.SecurePassword
-        if ([string]::IsNullOrWhiteSpace($user)) {
+        if ([string]::IsNullOrWhiteSpace($credTxtUser.Text)) {
             [System.Windows.MessageBox]::Show("Please enter a username.", "Credentials",
                 [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
             return
         }
-        $script:CredResult = [System.Management.Automation.PSCredential]::new($user, $pass)
         $CredWindow.DialogResult = $true
-        $CredWindow.Close()
     }.GetNewClosure())
 
     $credBtnCancel.Add_Click({
         $CredWindow.DialogResult = $false
-        $CredWindow.Close()
     }.GetNewClosure())
 
     $credTxtUser.Focus() | Out-Null
     $dialogResult = $CredWindow.ShowDialog()
 
-    if ($dialogResult) { return $script:CredResult }
+    if ($dialogResult -eq $true) {
+        $user = $credTxtUser.Text.Trim()
+        $pass = $credTxtPass.SecurePassword
+        return [System.Management.Automation.PSCredential]::new($user, $pass)
+    }
     return $null
 }
 
