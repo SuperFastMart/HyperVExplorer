@@ -1,6 +1,6 @@
 # =============================================================================================================
 # Script:    HyperVExplorer.ps1
-# Version:   1.0
+# Version:   1.1
 # Purpose:   WPF GUI tool for remote Hyper-V inventory collection across multiple hosts
 # Requires:  PowerShell 5.1+, WinRM enabled on target Hyper-V hosts
 # =============================================================================================================
@@ -95,7 +95,7 @@ Add-Type -AssemblyName WindowsBase
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="&#xE7F4; HyperV Explorer" FontSize="20" FontWeight="SemiBold"
                            Foreground="{StaticResource AccentBlue}" VerticalAlignment="Center"/>
-                <TextBlock Grid.Column="2" Text="v1.0" FontSize="12"
+                <TextBlock Grid.Column="2" Text="v1.1" FontSize="12"
                            Foreground="{StaticResource FgSubtle}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
@@ -235,6 +235,97 @@ function Show-Progress {
     $Window.Dispatcher.Invoke([Action]{}, 'Background')
 }
 
+function Test-IsIPAddress {
+    param([string]$Value)
+    $ip = $null
+    [System.Net.IPAddress]::TryParse($Value, [ref]$ip)
+}
+
+function Show-CredentialDialog {
+    param([string]$TargetHost)
+
+    [xml]$CredXAML = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Credentials — $TargetHost" Width="420" Height="240"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="#1e1e2e">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock Grid.Row="0" Text="Enter credentials for $TargetHost"
+                   Foreground="#cdd6f4" FontSize="14" Margin="0,0,0,16"/>
+        <Grid Grid.Row="1" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="90"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Username:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
+            <TextBox x:Name="txtUser" Grid.Column="1" FontSize="13"
+                     Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
+                     Padding="8,6" CaretBrush="#cdd6f4"/>
+        </Grid>
+        <Grid Grid.Row="2" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="90"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Password:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
+            <PasswordBox x:Name="txtPass" Grid.Column="1" FontSize="13"
+                         Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
+                         Padding="8,6" CaretBrush="#cdd6f4"/>
+        </Grid>
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="btnOK" Content="Connect" Width="90" Padding="8,6" Margin="0,0,8,0"
+                    Background="#364a63" Foreground="#89b4fa" FontSize="13" IsDefault="True"/>
+            <Button x:Name="btnCancel" Content="Cancel" Width="90" Padding="8,6"
+                    Background="#45475a" Foreground="#cdd6f4" FontSize="13" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
+"@
+
+    $CredReader = [System.Xml.XmlNodeReader]::new($CredXAML)
+    $CredWindow = [Windows.Markup.XamlReader]::Load($CredReader)
+    $CredWindow.Owner = $Window
+
+    $credTxtUser  = $CredWindow.FindName("txtUser")
+    $credTxtPass  = $CredWindow.FindName("txtPass")
+    $credBtnOK    = $CredWindow.FindName("btnOK")
+    $credBtnCancel = $CredWindow.FindName("btnCancel")
+
+    $script:CredResult = $null
+
+    $credBtnOK.Add_Click({
+        $user = $credTxtUser.Text.Trim()
+        $pass = $credTxtPass.SecurePassword
+        if ([string]::IsNullOrWhiteSpace($user)) {
+            [System.Windows.MessageBox]::Show("Please enter a username.", "Credentials",
+                [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
+            return
+        }
+        $script:CredResult = [System.Management.Automation.PSCredential]::new($user, $pass)
+        $CredWindow.DialogResult = $true
+        $CredWindow.Close()
+    }.GetNewClosure())
+
+    $credBtnCancel.Add_Click({
+        $CredWindow.DialogResult = $false
+        $CredWindow.Close()
+    }.GetNewClosure())
+
+    $credTxtUser.Focus() | Out-Null
+    $dialogResult = $CredWindow.ShowDialog()
+
+    if ($dialogResult) { return $script:CredResult }
+    return $null
+}
+
 # ---- Remote collection scriptblock (runs on target host) ----
 $CollectionScript = {
     $HostInfo    = Get-VMHost
@@ -301,6 +392,41 @@ $btnConnect.Add_Click({
         return
     }
 
+    # ---- Pre-connection checks ----
+    Set-Status "Pinging $TargetHost ..." "#89b4fa"
+    Show-Progress $true
+    $btnConnect.IsEnabled = $false
+    $Window.Dispatcher.Invoke([Action]{}, 'Background')
+
+    $PingOK = Test-Connection -ComputerName $TargetHost -Count 2 -Quiet -ErrorAction SilentlyContinue
+    if (-not $PingOK) {
+        Show-Progress $false
+        $btnConnect.IsEnabled = $true
+        Set-Status "Host unreachable: $TargetHost" "#f38ba8"
+        [System.Windows.MessageBox]::Show(
+            "Cannot reach '$TargetHost'.`n`nPing failed. Please check:`n- The hostname or IP is correct`n- The host is powered on and on the network`n- Firewalls allow ICMP",
+            "Host Unreachable",
+            [System.Windows.MessageBoxButton]::OK,
+            [System.Windows.MessageBoxImage]::Error)
+        return
+    }
+    Set-Status "Ping OK — checking WinRM on $TargetHost ..." "#89b4fa"
+    $Window.Dispatcher.Invoke([Action]{}, 'Background')
+
+    # Detect IP address — Kerberos won't work, need credentials + Negotiate
+    $IsIP = Test-IsIPAddress $TargetHost
+    $UseCurrentUser = $chkCurrentUser.IsChecked
+
+    if ($IsIP -and $UseCurrentUser) {
+        $Answer = [System.Windows.MessageBox]::Show(
+            "You're connecting by IP address ($TargetHost).`n`nKerberos authentication doesn't work with IP addresses. You need to either:`n`n1. Use a hostname instead of an IP`n2. Provide explicit credentials (click Yes)`n`nWould you like to enter credentials now?",
+            "IP Address Detected",
+            [System.Windows.MessageBoxButton]::YesNo,
+            [System.Windows.MessageBoxImage]::Warning)
+        if ($Answer -ne 'Yes') { return }
+        $UseCurrentUser = $false
+    }
+
     # Build connection parameters
     $InvokeParams = @{
         ComputerName = $TargetHost
@@ -309,20 +435,83 @@ $btnConnect.Add_Click({
     }
 
     $Credential = $null
-    if (-not $chkCurrentUser.IsChecked) {
-        $Credential = Get-Credential -Message "Enter credentials for $TargetHost"
+    if (-not $UseCurrentUser) {
+        $Credential = Show-CredentialDialog -TargetHost $TargetHost
         if (-not $Credential) {
+            Show-Progress $false
+            $btnConnect.IsEnabled = $true
             Set-Status "Connection cancelled." "#f9e2af"
             return
         }
         $InvokeParams['Credential'] = $Credential
+        $InvokeParams['Authentication'] = 'Negotiate'
     }
+
+    # When connecting by IP, ensure the host is in TrustedHosts
+    if ($IsIP) {
+        try {
+            $CurrentTrusted = (Get-Item WSMan:\localhost\Client\TrustedHosts -ErrorAction Stop).Value
+            $TrustedList = if ($CurrentTrusted) { $CurrentTrusted -split ',' | ForEach-Object { $_.Trim() } } else { @() }
+            if ($TargetHost -notin $TrustedList -and '*' -notin $TrustedList) {
+                $AddTrust = [System.Windows.MessageBox]::Show(
+                    "IP address '$TargetHost' is not in your WinRM TrustedHosts list.`n`nThis is required for IP-based connections. Add it now?`n`n(Requires running as Administrator)",
+                    "TrustedHosts",
+                    [System.Windows.MessageBoxButton]::YesNo,
+                    [System.Windows.MessageBoxImage]::Question)
+                if ($AddTrust -eq 'Yes') {
+                    $NewValue = if ($CurrentTrusted) { "$CurrentTrusted,$TargetHost" } else { $TargetHost }
+                    Set-Item WSMan:\localhost\Client\TrustedHosts -Value $NewValue -Force -ErrorAction Stop
+                    Set-Status "Added $TargetHost to TrustedHosts." "#a6e3a1"
+                    $Window.Dispatcher.Invoke([Action]{}, 'Background')
+                } else {
+                    Show-Progress $false
+                    $btnConnect.IsEnabled = $true
+                    Set-Status "Connection cancelled — TrustedHosts not updated." "#f9e2af"
+                    return
+                }
+            }
+        }
+        catch {
+            [System.Windows.MessageBox]::Show(
+                "Could not check/update TrustedHosts.`n`nError: $($_.Exception.Message)`n`nTry running HyperV Explorer as Administrator, or use a hostname instead of an IP.",
+                "TrustedHosts Error",
+                [System.Windows.MessageBoxButton]::OK,
+                [System.Windows.MessageBoxImage]::Error)
+            Show-Progress $false
+            $btnConnect.IsEnabled = $true
+            return
+        }
+    }
+
+    # WinRM connectivity test
+    Set-Status "Testing WinRM on $TargetHost ..." "#89b4fa"
+    $Window.Dispatcher.Invoke([Action]{}, 'Background')
+
+    $WinRMParams = @{ ComputerName = $TargetHost; ErrorAction = 'Stop' }
+    if ($Credential) {
+        $WinRMParams['Credential'] = $Credential
+        $WinRMParams['Authentication'] = 'Negotiate'
+    }
+    try {
+        Test-WSMan @WinRMParams | Out-Null
+    }
+    catch {
+        Show-Progress $false
+        $btnConnect.IsEnabled = $true
+        Set-Status "WinRM not available on $TargetHost" "#f38ba8"
+        [System.Windows.MessageBox]::Show(
+            "WinRM service is not available on '$TargetHost'.`n`nError: $($_.Exception.Message)`n`nOn the target host, run:`n  Enable-PSRemoting -Force`n  winrm quickconfig`n`nAlso check that the Windows Firewall allows WinRM (TCP 5985/5986).",
+            "WinRM Unavailable",
+            [System.Windows.MessageBoxButton]::OK,
+            [System.Windows.MessageBoxImage]::Error)
+        return
+    }
+
+    Set-Status "WinRM OK — collecting Hyper-V data from $TargetHost ..." "#89b4fa"
+    $Window.Dispatcher.Invoke([Action]{}, 'Background')
 
     # Connect and collect
     try {
-        Set-Status "Connecting to $TargetHost ..." "#89b4fa"
-        Show-Progress $true
-        $btnConnect.IsEnabled = $false
 
         $Results = Invoke-Command @InvokeParams
 
@@ -342,7 +531,7 @@ $btnConnect.Add_Click({
         $ErrMsg = $_.Exception.Message
         Set-Status "Failed to connect to $TargetHost" "#f38ba8"
         [System.Windows.MessageBox]::Show(
-            "Could not connect to '$TargetHost'.`n`nError: $ErrMsg`n`nMake sure:`n- WinRM is enabled on the target host`n- You have Hyper-V admin permissions`n- The host is reachable on the network",
+            "Could not connect to '$TargetHost'.`n`nError: $ErrMsg`n`nMake sure:`n- WinRM is enabled on the target (Enable-PSRemoting -Force)`n- You have Hyper-V admin permissions on the target`n- The host is reachable on the network`n- If using IP: the app is running as Administrator",
             "Connection Failed",
             [System.Windows.MessageBoxButton]::OK,
             [System.Windows.MessageBoxImage]::Error)
