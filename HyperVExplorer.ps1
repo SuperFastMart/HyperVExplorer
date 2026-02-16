@@ -519,8 +519,25 @@ $btnConnect.Add_Click({
         }
     }
 
-    # WinRM connectivity test
-    Set-Status "Testing WinRM on $TargetHost ..." "#89b4fa"
+    # WinRM port check (TCP 5985) — fast, no local WinRM dependency
+    Set-Status "Checking WinRM port on $TargetHost ..." "#89b4fa"
+    $Window.Dispatcher.Invoke([Action]{}, 'Background')
+
+    $PortTest = Test-NetConnection -ComputerName $TargetHost -Port 5985 -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
+    if (-not $PortTest.TcpTestSucceeded) {
+        Show-Progress $false
+        $btnConnect.IsEnabled = $true
+        Set-Status "WinRM port closed on $TargetHost" "#f38ba8"
+        [System.Windows.MessageBox]::Show(
+            "WinRM port (TCP 5985) is not open on '$TargetHost'.`n`nThis means WinRM is not enabled or a firewall is blocking it.`n`nOn the target host, run (as Administrator):`n  Enable-PSRemoting -Force`n`nThis will:`n  - Start the WinRM service`n  - Set it to auto-start`n  - Create firewall rules for TCP 5985/5986`n  - Configure the WinRM listener",
+            "WinRM Port Closed",
+            [System.Windows.MessageBoxButton]::OK,
+            [System.Windows.MessageBoxImage]::Error)
+        return
+    }
+
+    # WinRM authentication test
+    Set-Status "WinRM port open — testing authentication on $TargetHost ..." "#89b4fa"
     $Window.Dispatcher.Invoke([Action]{}, 'Background')
 
     $WinRMParams = @{ ComputerName = $TargetHost; ErrorAction = 'Stop' }
@@ -534,10 +551,10 @@ $btnConnect.Add_Click({
     catch {
         Show-Progress $false
         $btnConnect.IsEnabled = $true
-        Set-Status "WinRM not available on $TargetHost" "#f38ba8"
+        Set-Status "WinRM auth failed on $TargetHost" "#f38ba8"
         [System.Windows.MessageBox]::Show(
-            "WinRM service is not available on '$TargetHost'.`n`nError: $($_.Exception.Message)`n`nOn the target host, run:`n  Enable-PSRemoting -Force`n  winrm quickconfig`n`nAlso check that the Windows Firewall allows WinRM (TCP 5985/5986).",
-            "WinRM Unavailable",
+            "WinRM port is open on '$TargetHost' but authentication failed.`n`nError: $($_.Exception.Message)`n`nCheck that:`n- Your credentials are correct`n- Your account has remote management permissions`n- The WinRM service is fully configured on the target",
+            "WinRM Authentication Failed",
             [System.Windows.MessageBoxButton]::OK,
             [System.Windows.MessageBoxImage]::Error)
         return
