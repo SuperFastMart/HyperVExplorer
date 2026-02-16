@@ -10,9 +10,12 @@ Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 
-# ---- SSL certificate bypass for Proxmox self-signed certs (PS 5.1 compatible) ----
-if (-not ([System.Management.Automation.PSTypeName]'TrustAllCertsPolicy').Type) {
-    Add-Type @"
+# ---- SSL certificate bypass for Proxmox self-signed certs ----
+# PS 5.1 uses .NET Framework (ICertificatePolicy); PS 7+ uses -SkipCertificateCheck
+$script:IsPowerShell5 = $PSVersionTable.PSVersion.Major -le 5
+if ($script:IsPowerShell5) {
+    if (-not ([System.Management.Automation.PSTypeName]'TrustAllCertsPolicy').Type) {
+        Add-Type @"
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
 public class TrustAllCertsPolicy : ICertificatePolicy {
@@ -22,8 +25,9 @@ public class TrustAllCertsPolicy : ICertificatePolicy {
     }
 }
 "@
+    }
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 }
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # ---- Config file management ----
 function Get-ConfigPath {
@@ -1804,6 +1808,33 @@ function Connect-HyperVHost {
     }
 }
 
+# ---- Proxmox VE helper: SSL-aware REST call ----
+function Invoke-PveApi {
+    param(
+        [string]$Uri,
+        [hashtable]$Headers,
+        [string]$Method = "GET",
+        [hashtable]$Body
+    )
+    $params = @{ Uri = $Uri; Method = $Method; Headers = $Headers }
+    if ($Body) { $params.Body = $Body }
+    if (-not $script:IsPowerShell5) { $params.SkipCertificateCheck = $true }
+    Invoke-RestMethod @params
+}
+
+function Enable-PveSslBypass {
+    if ($script:IsPowerShell5) {
+        $script:OriginalCertPolicy = [System.Net.ServicePointManager]::CertificatePolicy
+        [System.Net.ServicePointManager]::CertificatePolicy = [TrustAllCertsPolicy]::new()
+    }
+}
+
+function Disable-PveSslBypass {
+    if ($script:IsPowerShell5 -and $null -ne $script:OriginalCertPolicy) {
+        [System.Net.ServicePointManager]::CertificatePolicy = $script:OriginalCertPolicy
+    }
+}
+
 # ---- Proxmox VE helper: build auth headers ----
 function Get-PveAuthHeaders {
     param(
@@ -1826,7 +1857,7 @@ function Get-PveAuthHeaders {
         $plainPass = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
             [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Password))
         $body = @{ username = $Username; password = $plainPass }
-        $ticketResponse = Invoke-RestMethod -Uri "$BaseUrl/api2/json/access/ticket" -Method POST -Body $body
+        $ticketResponse = Invoke-PveApi -Uri "$BaseUrl/api2/json/access/ticket" -Method POST -Body $body
         $ticket = $ticketResponse.data.ticket
         $csrf = $ticketResponse.data.CSRFPreventionToken
         return @{
@@ -1914,8 +1945,7 @@ function Connect-ProxmoxHost {
     Show-Progress $true
 
     # Temporarily bypass SSL for self-signed certs
-    $originalPolicy = [System.Net.ServicePointManager]::CertificatePolicy
-    [System.Net.ServicePointManager]::CertificatePolicy = [TrustAllCertsPolicy]::new()
+    Enable-PveSslBypass
 
     try {
         # Test TCP port
@@ -1944,7 +1974,7 @@ function Connect-ProxmoxHost {
         # Helper for API calls
         $apiGet = {
             param([string]$Path)
-            (Invoke-RestMethod -Uri "$BaseUrl$Path" -Headers $headers -Method GET).data
+            (Invoke-PveApi -Uri "$BaseUrl$Path" -Headers $headers -Method GET).data
         }
 
         # Get cluster nodes
@@ -2075,7 +2105,7 @@ function Connect-ProxmoxHost {
         return $false
     }
     finally {
-        [System.Net.ServicePointManager]::CertificatePolicy = $originalPolicy
+        Disable-PveSslBypass
         Show-Progress $false
         Update-StatusBar
     }
@@ -2108,8 +2138,7 @@ function Connect-ProxmoxPDM {
     Set-Status "Connecting to PDM $TargetHost`:$Port..." "#f9e2af"
     Show-Progress $true
 
-    $originalPolicy = [System.Net.ServicePointManager]::CertificatePolicy
-    [System.Net.ServicePointManager]::CertificatePolicy = [TrustAllCertsPolicy]::new()
+    Enable-PveSslBypass
 
     try {
         # Test TCP port
@@ -2135,7 +2164,7 @@ function Connect-ProxmoxPDM {
 
         $apiGet = {
             param([string]$Path)
-            (Invoke-RestMethod -Uri "$BaseUrl$Path" -Headers $headers -Method GET).data
+            (Invoke-PveApi -Uri "$BaseUrl$Path" -Headers $headers -Method GET).data
         }
 
         # PDM: enumerate remotes (managed PVE clusters)
@@ -2233,7 +2262,7 @@ function Connect-ProxmoxPDM {
         return $false
     }
     finally {
-        [System.Net.ServicePointManager]::CertificatePolicy = $originalPolicy
+        Disable-PveSslBypass
         Show-Progress $false
         Update-StatusBar
     }
