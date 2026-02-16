@@ -1,0 +1,15 @@
+# Windows
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# PowerShell
+*.psm1.bak
+*.ps1.bak
+
+# IDE
+.vscode/
+*.code-workspace
+
+# Exports
+*.csv
