@@ -210,6 +210,28 @@ $script:VMData = [System.Collections.ObjectModel.ObservableCollection[PSCustomOb
 $dgVMs.ItemsSource = $script:VMData
 $script:ConnectedHosts = @{}  # HostName -> @{ Credential = $cred; VMCount = N }
 
+# ---- Check local WinRM service at startup ----
+$WinRMService = Get-Service -Name WinRM -ErrorAction SilentlyContinue
+if ($WinRMService -and $WinRMService.Status -ne 'Running') {
+    $StartIt = [System.Windows.MessageBox]::Show(
+        "The WinRM service is not running on this machine.`n`nIt is required for remote connections. Start it now?",
+        "WinRM Service Required",
+        [System.Windows.MessageBoxButton]::YesNo,
+        [System.Windows.MessageBoxImage]::Question)
+    if ($StartIt -eq 'Yes') {
+        try {
+            Start-Service -Name WinRM -ErrorAction Stop
+        }
+        catch {
+            [System.Windows.MessageBox]::Show(
+                "Could not start WinRM service.`n`nError: $($_.Exception.Message)`n`nTry running as Administrator.",
+                "Service Error",
+                [System.Windows.MessageBoxButton]::OK,
+                [System.Windows.MessageBoxImage]::Error)
+        }
+    }
+}
+
 # ---- Helper functions ----
 function Update-StatusBar {
     $hostCount = $script:ConnectedHosts.Count
@@ -388,6 +410,22 @@ $btnConnect.Add_Click({
         [System.Windows.MessageBox]::Show("Host '$TargetHost' is already connected.", "HyperV Explorer",
             [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
         return
+    }
+
+    # ---- Ensure local WinRM is running ----
+    $svc = Get-Service -Name WinRM -ErrorAction SilentlyContinue
+    if ($svc -and $svc.Status -ne 'Running') {
+        try {
+            Start-Service -Name WinRM -ErrorAction Stop
+        }
+        catch {
+            [System.Windows.MessageBox]::Show(
+                "WinRM service is not running and could not be started.`n`nError: $($_.Exception.Message)`n`nTry running as Administrator.",
+                "WinRM Required",
+                [System.Windows.MessageBoxButton]::OK,
+                [System.Windows.MessageBoxImage]::Error)
+            return
+        }
     }
 
     # ---- Pre-connection checks ----
