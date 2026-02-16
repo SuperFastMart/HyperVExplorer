@@ -1,7 +1,7 @@
 # =============================================================================================================
 # Script:    HyperVExplorer.ps1
 # Version:   2.0
-# Purpose:   WPF GUI tool for remote hypervisor inventory (Hyper-V, Proxmox VE, Proxmox PDM)
+# Purpose:   WPF GUI tool for remote hypervisor inventory (Hyper-V, Proxmox VE)
 # Requires:  PowerShell 5.1+, WinRM for Hyper-V hosts, HTTPS for Proxmox hosts
 # =============================================================================================================
 
@@ -329,7 +329,6 @@ function Get-GroupCredential {
                           ToolTip="Select hypervisor type for ad-hoc connections">
                     <ComboBoxItem Content="Hyper-V"/>
                     <ComboBoxItem Content="Proxmox VE"/>
-                    <ComboBoxItem Content="Proxmox PDM"/>
                 </ComboBox>
                 <CheckBox x:Name="chkCurrentUser" Content="Use current user" IsChecked="True"
                           Margin="12,0,0,0" VerticalAlignment="Center"/>
@@ -677,9 +676,9 @@ function Show-GroupEditDialog {
                 <RadioButton x:Name="rdoTypeHyperV" Content="Hyper-V" GroupName="hvType"
                              Foreground="#89b4fa" FontSize="13" Margin="0,0,20,0" IsChecked="True"/>
                 <RadioButton x:Name="rdoTypePVE" Content="Proxmox VE" GroupName="hvType"
-                             Foreground="#a6e3a1" FontSize="13" Margin="0,0,20,0"/>
+                             Foreground="#a6e3a1" FontSize="13"/>
                 <RadioButton x:Name="rdoTypePDM" Content="Proxmox PDM" GroupName="hvType"
-                             Foreground="#f9e2af" FontSize="13"/>
+                             Foreground="#f9e2af" FontSize="13" Visibility="Collapsed"/>
             </StackPanel>
         </StackPanel>
 
