@@ -9,7 +9,8 @@
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)) {
     # Use EncodedCommand to handle paths with special characters (e.g. # in folder names)
-    $cmd = "& '$PSCommandPath'"
+    $scriptPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+    $cmd = "Set-Location '$([System.IO.Path]::GetDirectoryName($scriptPath))'; & '$scriptPath'"
     $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($cmd))
     Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded"
     exit
@@ -429,7 +430,7 @@ $btnConnect.Add_Click({
 
     if ($IsIP -and $UseCurrentUser) {
         $Answer = [System.Windows.MessageBox]::Show(
-            "You're connecting by IP address ($TargetHost).`n`nKerberos authentication doesn't work with IP addresses. You need to either:`n`n1. Use a hostname instead of an IP`n2. Provide explicit credentials (click Yes)`n`nWould you like to enter credentials now?",
+            "You are connecting by IP address ($($TargetHost)).`n`nKerberos authentication does not work with IP addresses. You need to either:`n`n1. Use a hostname instead of an IP`n2. Provide explicit credentials (click Yes)`n`nWould you like to enter credentials now?",
             "IP Address Detected",
             [System.Windows.MessageBoxButton]::YesNo,
             [System.Windows.MessageBoxImage]::Warning)
