@@ -1,14 +1,29 @@
 # =============================================================================================================
 # Script:    HyperVExplorer.ps1
-# Version:   1.5
-# Purpose:   WPF GUI tool for remote Hyper-V inventory collection across multiple hosts
-# Requires:  PowerShell 5.1+, WinRM enabled on target Hyper-V hosts
+# Version:   2.0
+# Purpose:   WPF GUI tool for remote hypervisor inventory (Hyper-V, Proxmox VE, Proxmox PDM)
+# Requires:  PowerShell 5.1+, WinRM for Hyper-V hosts, HTTPS for Proxmox hosts
 # =============================================================================================================
 
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
+
+# ---- SSL certificate bypass for Proxmox self-signed certs (PS 5.1 compatible) ----
+if (-not ([System.Management.Automation.PSTypeName]'TrustAllCertsPolicy').Type) {
+    Add-Type @"
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
+public class TrustAllCertsPolicy : ICertificatePolicy {
+    public bool CheckValidationResult(ServicePoint srvPoint,
+        X509Certificate certificate, WebRequest request, int certificateProblem) {
+        return true;
+    }
+}
+"@
+}
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # ---- Config file management ----
 function Get-ConfigPath {
@@ -26,12 +41,27 @@ function Load-Config {
             if (-not (Get-Member -InputObject $cfg -Name 'groups' -MemberType NoteProperty)) {
                 $cfg | Add-Member -NotePropertyName 'groups' -NotePropertyValue @()
             }
+            # Upgrade to v3: add type field to hosts and groups
+            if (-not $cfg.version -or $cfg.version -lt 3) {
+                foreach ($h in @($cfg.hosts)) {
+                    if (-not (Get-Member -InputObject $h -Name 'type' -MemberType NoteProperty)) {
+                        $h | Add-Member -NotePropertyName 'type' -NotePropertyValue 'hyperv'
+                    }
+                }
+                foreach ($g in @($cfg.groups)) {
+                    if (-not (Get-Member -InputObject $g -Name 'type' -MemberType NoteProperty)) {
+                        $g | Add-Member -NotePropertyName 'type' -NotePropertyValue 'hyperv'
+                    }
+                }
+                $cfg.version = 3
+                Save-Config $cfg
+            }
             return $cfg
         } catch {
-            return [PSCustomObject]@{ version = 2; hosts = @(); groups = @() }
+            return [PSCustomObject]@{ version = 3; hosts = @(); groups = @() }
         }
     }
-    return [PSCustomObject]@{ version = 2; hosts = @(); groups = @() }
+    return [PSCustomObject]@{ version = 3; hosts = @(); groups = @() }
 }
 
 function Save-Config {
@@ -43,6 +73,7 @@ function Save-Config {
 function Save-HostToHistory {
     param(
         [string]$Address,
+        [string]$Type = "hyperv",
         [bool]$UseCurrentUser,
         [System.Management.Automation.PSCredential]$Credential,
         [bool]$RememberCredential
@@ -52,6 +83,7 @@ function Save-HostToHistory {
 
     $entry = [PSCustomObject]@{
         address           = $Address
+        type              = $Type
         lastConnected     = (Get-Date).ToString("o")
         useCurrentUser    = $UseCurrentUser
         username          = $null
@@ -121,7 +153,7 @@ function Get-GroupCredential {
 <Window
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Title="HyperV Explorer"
+    Title="Hypervisor Explorer"
     Width="1400" Height="750"
     MinWidth="900" MinHeight="500"
     WindowStartupLocation="CenterScreen"
@@ -201,9 +233,9 @@ function Get-GroupCredential {
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="&#xE7F4; HyperV Explorer" FontSize="20" FontWeight="SemiBold"
+                <TextBlock Grid.Column="0" Text="&#xE7F4; Hypervisor Explorer" FontSize="20" FontWeight="SemiBold"
                            Foreground="{StaticResource AccentBlue}" VerticalAlignment="Center"/>
-                <TextBlock Grid.Column="2" Text="v1.5" FontSize="12"
+                <TextBlock Grid.Column="2" Text="v2.0" FontSize="12"
                            Foreground="{StaticResource FgSubtle}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
@@ -218,9 +250,17 @@ function Get-GroupCredential {
                 <Button x:Name="btnHistory" Content="&#x25BE;" Margin="2,0,0,0" Padding="8,8"
                         Background="{StaticResource BgMedium}" Foreground="{StaticResource FgSubtle}"
                         ToolTip="Recent hosts" FontSize="13"/>
+                <ComboBox x:Name="cmbHostType" Width="130" Margin="12,0,0,0" SelectedIndex="0"
+                          VerticalAlignment="Center" FontSize="13"
+                          Background="{StaticResource BgMedium}" Foreground="{StaticResource FgText}"
+                          ToolTip="Select hypervisor type for ad-hoc connections">
+                    <ComboBoxItem Content="Hyper-V"/>
+                    <ComboBoxItem Content="Proxmox VE"/>
+                    <ComboBoxItem Content="Proxmox PDM"/>
+                </ComboBox>
                 <CheckBox x:Name="chkCurrentUser" Content="Use current user" IsChecked="True"
-                          Margin="16,0,0,0" VerticalAlignment="Center"/>
-                <Button x:Name="btnConnect" Content="&#x2B; Connect" Margin="16,0,0,0"
+                          Margin="12,0,0,0" VerticalAlignment="Center"/>
+                <Button x:Name="btnConnect" Content="&#x2B; Connect" Margin="12,0,0,0"
                         Background="#364a63" Foreground="{StaticResource AccentBlue}"/>
                 <Button x:Name="btnBulkConnect" Content="&#x21C4; Bulk Connect" Margin="8,0,0,0"
                         Background="#364a63" Foreground="{StaticResource AccentBlue}"
@@ -268,6 +308,7 @@ function Get-GroupCredential {
             </DataGrid.ColumnHeaderStyle>
 
             <DataGrid.Columns>
+                <DataGridTextColumn Header="Platform" Binding="{Binding Platform}" Width="80"/>
                 <DataGridTextColumn Header="Host" Binding="{Binding HostName}" Width="120"/>
                 <DataGridTextColumn Header="Host CPU" Binding="{Binding HostCPU}" Width="70"/>
                 <DataGridTextColumn Header="Host Mem (GB)" Binding="{Binding HostMemoryGB}" Width="95"/>
@@ -295,7 +336,7 @@ function Get-GroupCredential {
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="txtStatus" Grid.Column="0" Text="Ready — enter a host and click Connect"
+                <TextBlock x:Name="txtStatus" Grid.Column="0" Text="Ready -- enter a host and click Connect"
                            Foreground="{StaticResource FgSubtle}" FontSize="12" VerticalAlignment="Center"/>
                 <ProgressBar x:Name="pbProgress" Grid.Column="2" Width="120" Height="8"
                              IsIndeterminate="False" Visibility="Collapsed" Margin="0,0,16,0"
@@ -313,6 +354,7 @@ $Reader = [System.Xml.XmlNodeReader]::new($XAML)
 $Window = [Windows.Markup.XamlReader]::Load($Reader)
 
 $txtHost         = $Window.FindName("txtHost")
+$cmbHostType     = $Window.FindName("cmbHostType")
 $chkCurrentUser  = $Window.FindName("chkCurrentUser")
 $btnConnect      = $Window.FindName("btnConnect")
 $btnBulkConnect  = $Window.FindName("btnBulkConnect")
@@ -354,6 +396,18 @@ if ($WinRMService -and $WinRMService.Status -ne 'Running') {
         }
     }
 }
+
+# ---- Toggle "Use current user" visibility based on selected platform ----
+$cmbHostType.Add_SelectionChanged({
+    if ($cmbHostType.SelectedIndex -eq 0) {
+        # Hyper-V: show current user checkbox
+        $chkCurrentUser.Visibility = "Visible"
+    } else {
+        # Proxmox: hide current user checkbox (not applicable)
+        $chkCurrentUser.Visibility = "Collapsed"
+        $chkCurrentUser.IsChecked = $false
+    }
+})
 
 # ---- Helper functions ----
 function Update-StatusBar {
@@ -502,8 +556,12 @@ function Show-CredentialDialog {
 function Show-GroupEditDialog {
     param(
         [string]$GroupName = "",
+        [string]$GroupType = "hyperv",
         [string]$Username = "",
-        [bool]$UseCurrentUser = $false
+        [bool]$UseCurrentUser = $false,
+        [int]$Port = 0,
+        [string]$PveAuthType = "token",
+        [string]$PveTokenId = ""
     )
 
     $titleText = if ($GroupName) { "Edit Group" } else { "New Group" }
@@ -511,9 +569,10 @@ function Show-GroupEditDialog {
     [xml]$GrpXAML = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="$titleText" Width="450" Height="340"
+        Title="$titleText" Width="500" Height="480"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
         Background="#1e1e2e">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
     <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -521,14 +580,15 @@ function Show-GroupEditDialog {
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <TextBlock Grid.Row="0" Text="$titleText" Foreground="#cdd6f4" FontSize="16"
                    FontWeight="SemiBold" Margin="0,0,0,16"/>
+
+        <!-- Group Name -->
         <Grid Grid.Row="1" Margin="0,0,0,12">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="100"/>
+                <ColumnDefinition Width="110"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <TextBlock Text="Group Name:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
@@ -536,39 +596,130 @@ function Show-GroupEditDialog {
                      Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
                      Padding="8,6" CaretBrush="#cdd6f4"/>
         </Grid>
-        <StackPanel Grid.Row="2" Margin="0,0,0,12">
-            <RadioButton x:Name="rdoCurrentUser" Content="Use current user (Kerberos)" GroupName="auth"
-                         Foreground="#cdd6f4" FontSize="13" Margin="0,0,0,6"/>
-            <RadioButton x:Name="rdoCredentials" Content="Use specific credentials" GroupName="auth"
-                         Foreground="#cdd6f4" FontSize="13" IsChecked="True"/>
+
+        <!-- Hypervisor Type -->
+        <StackPanel Grid.Row="2" Margin="0,0,0,14">
+            <TextBlock Text="Hypervisor Type:" Foreground="#a6adc8" FontSize="13" Margin="0,0,0,6"/>
+            <StackPanel Orientation="Horizontal">
+                <RadioButton x:Name="rdoTypeHyperV" Content="Hyper-V" GroupName="hvType"
+                             Foreground="#89b4fa" FontSize="13" Margin="0,0,20,0" IsChecked="True"/>
+                <RadioButton x:Name="rdoTypePVE" Content="Proxmox VE" GroupName="hvType"
+                             Foreground="#a6e3a1" FontSize="13" Margin="0,0,20,0"/>
+                <RadioButton x:Name="rdoTypePDM" Content="Proxmox PDM" GroupName="hvType"
+                             Foreground="#f9e2af" FontSize="13"/>
+            </StackPanel>
         </StackPanel>
-        <Grid Grid.Row="3" Margin="0,0,0,8" x:Name="credPanel">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="100"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Text="Username:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
-            <TextBox x:Name="txtGrpUser" Grid.Column="1" FontSize="13"
-                     Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
-                     Padding="8,6" CaretBrush="#cdd6f4"/>
-        </Grid>
-        <Grid Grid.Row="4" Margin="0,0,0,12" x:Name="passPanel">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="100"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Text="Password:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
-            <PasswordBox x:Name="txtGrpPass" Grid.Column="1" FontSize="13"
+
+        <!-- Hyper-V Auth Panel -->
+        <StackPanel Grid.Row="3" x:Name="panelHyperV" Margin="0,0,0,12">
+            <StackPanel Margin="0,0,0,10">
+                <RadioButton x:Name="rdoCurrentUser" Content="Use current user (Kerberos)" GroupName="hvAuth"
+                             Foreground="#cdd6f4" FontSize="13" Margin="0,0,0,6"/>
+                <RadioButton x:Name="rdoCredentials" Content="Use specific credentials" GroupName="hvAuth"
+                             Foreground="#cdd6f4" FontSize="13" IsChecked="True"/>
+            </StackPanel>
+            <Grid Margin="0,0,0,8" x:Name="hvCredPanel">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="110"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Username:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
+                <TextBox x:Name="txtGrpUser" Grid.Column="1" FontSize="13"
                          Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
                          Padding="8,6" CaretBrush="#cdd6f4"/>
-        </Grid>
-        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
+            </Grid>
+            <Grid Margin="0,0,0,8" x:Name="hvPassPanel">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="110"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Password:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
+                <PasswordBox x:Name="txtGrpPass" Grid.Column="1" FontSize="13"
+                             Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
+                             Padding="8,6" CaretBrush="#cdd6f4"/>
+            </Grid>
+        </StackPanel>
+
+        <!-- Proxmox Auth Panel (shared by PVE and PDM) -->
+        <StackPanel Grid.Row="4" x:Name="panelProxmox" Visibility="Collapsed" Margin="0,0,0,12">
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="110"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Port:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
+                <TextBox x:Name="txtPvePort" Grid.Column="1" Width="80" HorizontalAlignment="Left" FontSize="13"
+                         Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
+                         Padding="8,6" CaretBrush="#cdd6f4"/>
+            </Grid>
+            <StackPanel Margin="0,0,0,10">
+                <RadioButton x:Name="rdoPveToken" Content="API Token (recommended)" GroupName="pveAuth"
+                             Foreground="#cdd6f4" FontSize="13" Margin="0,0,0,6" IsChecked="True"/>
+                <RadioButton x:Name="rdoPvePassword" Content="Username / Password" GroupName="pveAuth"
+                             Foreground="#cdd6f4" FontSize="13"/>
+            </StackPanel>
+            <!-- Token fields -->
+            <StackPanel x:Name="panelPveToken">
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="110"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Token ID:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
+                    <TextBox x:Name="txtPveTokenId" Grid.Column="1" FontSize="13"
+                             Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
+                             Padding="8,6" CaretBrush="#cdd6f4"
+                             ToolTip="e.g. user@pam!tokenname"/>
+                </Grid>
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="110"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Token Secret:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
+                    <PasswordBox x:Name="txtPveTokenSecret" Grid.Column="1" FontSize="13"
+                                 Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
+                                 Padding="8,6" CaretBrush="#cdd6f4"
+                                 ToolTip="UUID secret for the API token"/>
+                </Grid>
+            </StackPanel>
+            <!-- Password fields -->
+            <StackPanel x:Name="panelPvePass" Visibility="Collapsed">
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="110"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Username:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
+                    <TextBox x:Name="txtPveUser" Grid.Column="1" FontSize="13"
+                             Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
+                             Padding="8,6" CaretBrush="#cdd6f4"
+                             ToolTip="e.g. root@pam"/>
+                </Grid>
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="110"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Password:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
+                    <PasswordBox x:Name="txtPvePass" Grid.Column="1" FontSize="13"
+                                 Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
+                                 Padding="8,6" CaretBrush="#cdd6f4"/>
+                </Grid>
+            </StackPanel>
+            <TextBlock x:Name="txtPveNote" Text="Connect to one cluster node to discover all VMs in the cluster."
+                       Foreground="#a6adc8" FontSize="11" FontStyle="Italic" Margin="0,4,0,0" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <!-- Buttons -->
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
             <Button x:Name="btnGrpSave" Content="Save" Width="90" Padding="8,6" Margin="0,0,8,0"
                     Background="#364a63" Foreground="#89b4fa" FontSize="13" IsDefault="True"/>
             <Button x:Name="btnGrpCancel" Content="Cancel" Width="90" Padding="8,6"
                     Background="#45475a" Foreground="#cdd6f4" FontSize="13" IsCancel="True"/>
         </StackPanel>
     </Grid>
+    </ScrollViewer>
 </Window>
 "@
 
@@ -576,57 +727,132 @@ function Show-GroupEditDialog {
     $GrpWindow = [Windows.Markup.XamlReader]::Load($GrpReader)
     $GrpWindow.Owner = $Window
 
-    $txtGrpName    = $GrpWindow.FindName("txtGrpName")
-    $rdoCurrentUser = $GrpWindow.FindName("rdoCurrentUser")
-    $rdoCredentials = $GrpWindow.FindName("rdoCredentials")
-    $txtGrpUser    = $GrpWindow.FindName("txtGrpUser")
-    $txtGrpPass    = $GrpWindow.FindName("txtGrpPass")
-    $credPanel     = $GrpWindow.FindName("credPanel")
-    $passPanel     = $GrpWindow.FindName("passPanel")
-    $btnGrpSave    = $GrpWindow.FindName("btnGrpSave")
-    $btnGrpCancel  = $GrpWindow.FindName("btnGrpCancel")
+    # Find all controls
+    $txtGrpName      = $GrpWindow.FindName("txtGrpName")
+    $rdoTypeHyperV   = $GrpWindow.FindName("rdoTypeHyperV")
+    $rdoTypePVE      = $GrpWindow.FindName("rdoTypePVE")
+    $rdoTypePDM      = $GrpWindow.FindName("rdoTypePDM")
+    $panelHyperV     = $GrpWindow.FindName("panelHyperV")
+    $panelProxmox    = $GrpWindow.FindName("panelProxmox")
+    $rdoCurrentUser  = $GrpWindow.FindName("rdoCurrentUser")
+    $rdoCredentials  = $GrpWindow.FindName("rdoCredentials")
+    $txtGrpUser      = $GrpWindow.FindName("txtGrpUser")
+    $txtGrpPass      = $GrpWindow.FindName("txtGrpPass")
+    $hvCredPanel     = $GrpWindow.FindName("hvCredPanel")
+    $hvPassPanel     = $GrpWindow.FindName("hvPassPanel")
+    $txtPvePort      = $GrpWindow.FindName("txtPvePort")
+    $rdoPveToken     = $GrpWindow.FindName("rdoPveToken")
+    $rdoPvePassword  = $GrpWindow.FindName("rdoPvePassword")
+    $panelPveToken   = $GrpWindow.FindName("panelPveToken")
+    $panelPvePass    = $GrpWindow.FindName("panelPvePass")
+    $txtPveTokenId   = $GrpWindow.FindName("txtPveTokenId")
+    $txtPveTokenSecret = $GrpWindow.FindName("txtPveTokenSecret")
+    $txtPveUser      = $GrpWindow.FindName("txtPveUser")
+    $txtPvePass      = $GrpWindow.FindName("txtPvePass")
+    $txtPveNote      = $GrpWindow.FindName("txtPveNote")
+    $btnGrpSave      = $GrpWindow.FindName("btnGrpSave")
+    $btnGrpCancel    = $GrpWindow.FindName("btnGrpCancel")
 
-    # Pre-fill values
+    # ---- Panel switching based on hypervisor type ----
+    $switchPanel = {
+        if ($rdoTypeHyperV.IsChecked) {
+            $panelHyperV.Visibility = "Visible"
+            $panelProxmox.Visibility = "Collapsed"
+        } else {
+            $panelHyperV.Visibility = "Collapsed"
+            $panelProxmox.Visibility = "Visible"
+            if ($rdoTypePDM.IsChecked) {
+                $txtPveNote.Text = "Connect to Datacenter Manager to discover all clusters and VMs."
+                if ([string]::IsNullOrWhiteSpace($txtPvePort.Text) -or $txtPvePort.Text -eq "8006") {
+                    $txtPvePort.Text = "8443"
+                }
+            } else {
+                $txtPveNote.Text = "Connect to one cluster node to discover all VMs in the cluster."
+                if ([string]::IsNullOrWhiteSpace($txtPvePort.Text) -or $txtPvePort.Text -eq "8443") {
+                    $txtPvePort.Text = "8006"
+                }
+            }
+        }
+    }
+
+    $rdoTypeHyperV.Add_Checked({ & $switchPanel })
+    $rdoTypePVE.Add_Checked({ & $switchPanel })
+    $rdoTypePDM.Add_Checked({ & $switchPanel })
+
+    # ---- Hyper-V auth toggle ----
+    $rdoCurrentUser.Add_Checked({
+        $hvCredPanel.IsEnabled = $false; $hvPassPanel.IsEnabled = $false
+        $hvCredPanel.Opacity = 0.4; $hvPassPanel.Opacity = 0.4
+    }.GetNewClosure())
+    $rdoCredentials.Add_Checked({
+        $hvCredPanel.IsEnabled = $true; $hvPassPanel.IsEnabled = $true
+        $hvCredPanel.Opacity = 1.0; $hvPassPanel.Opacity = 1.0
+    }.GetNewClosure())
+
+    # ---- PVE auth toggle ----
+    $rdoPveToken.Add_Checked({
+        $panelPveToken.Visibility = "Visible"
+        $panelPvePass.Visibility = "Collapsed"
+    }.GetNewClosure())
+    $rdoPvePassword.Add_Checked({
+        $panelPveToken.Visibility = "Collapsed"
+        $panelPvePass.Visibility = "Visible"
+    }.GetNewClosure())
+
+    # ---- Pre-fill values ----
     if ($GroupName) { $txtGrpName.Text = $GroupName }
-    if ($Username) { $txtGrpUser.Text = $Username }
+    switch ($GroupType) {
+        "proxmox"     { $rdoTypePVE.IsChecked = $true }
+        "proxmox-pdm" { $rdoTypePDM.IsChecked = $true }
+        default       { $rdoTypeHyperV.IsChecked = $true }
+    }
+    if ($Port -gt 0) { $txtPvePort.Text = "$Port" }
+    elseif ($GroupType -eq "proxmox-pdm") { $txtPvePort.Text = "8443" }
+    else { $txtPvePort.Text = "8006" }
+
+    if ($PveAuthType -eq "password") {
+        $rdoPvePassword.IsChecked = $true
+    }
+    if ($PveTokenId) { $txtPveTokenId.Text = $PveTokenId }
+    if ($Username) {
+        if ($GroupType -eq "hyperv") { $txtGrpUser.Text = $Username }
+        else { $txtPveUser.Text = $Username }
+    }
     if ($UseCurrentUser) {
         $rdoCurrentUser.IsChecked = $true
-        $rdoCredentials.IsChecked = $false
+        $hvCredPanel.IsEnabled = $false; $hvPassPanel.IsEnabled = $false
+        $hvCredPanel.Opacity = 0.4; $hvPassPanel.Opacity = 0.4
     }
 
-    # Toggle credential fields based on radio selection
-    $rdoCurrentUser.Add_Checked({
-        $credPanel.IsEnabled = $false
-        $passPanel.IsEnabled = $false
-        $credPanel.Opacity = 0.4
-        $passPanel.Opacity = 0.4
-    }.GetNewClosure())
+    # Trigger initial panel state
+    & $switchPanel
 
-    $rdoCredentials.Add_Checked({
-        $credPanel.IsEnabled = $true
-        $passPanel.IsEnabled = $true
-        $credPanel.Opacity = 1.0
-        $passPanel.Opacity = 1.0
-    }.GetNewClosure())
-
-    # Apply initial state
-    if ($UseCurrentUser) {
-        $credPanel.IsEnabled = $false
-        $passPanel.IsEnabled = $false
-        $credPanel.Opacity = 0.4
-        $passPanel.Opacity = 0.4
-    }
-
+    # ---- Save / Cancel ----
     $btnGrpSave.Add_Click({
         if ([string]::IsNullOrWhiteSpace($txtGrpName.Text)) {
             [System.Windows.MessageBox]::Show("Please enter a group name.", "Group",
                 [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
             return
         }
-        if ($rdoCredentials.IsChecked -and [string]::IsNullOrWhiteSpace($txtGrpUser.Text)) {
+        # Hyper-V validation
+        if ($rdoTypeHyperV.IsChecked -and $rdoCredentials.IsChecked -and
+            [string]::IsNullOrWhiteSpace($txtGrpUser.Text)) {
             [System.Windows.MessageBox]::Show("Please enter a username for the credential set.", "Group",
                 [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
             return
+        }
+        # Proxmox validation
+        if (-not $rdoTypeHyperV.IsChecked) {
+            if ($rdoPveToken.IsChecked -and [string]::IsNullOrWhiteSpace($txtPveTokenId.Text)) {
+                [System.Windows.MessageBox]::Show("Please enter an API Token ID (e.g. user@pam!tokenname).", "Group",
+                    [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
+                return
+            }
+            if ($rdoPvePassword.IsChecked -and [string]::IsNullOrWhiteSpace($txtPveUser.Text)) {
+                [System.Windows.MessageBox]::Show("Please enter a username (e.g. root@pam).", "Group",
+                    [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
+                return
+            }
         }
         $GrpWindow.DialogResult = $true
     }.GetNewClosure())
@@ -639,15 +865,47 @@ function Show-GroupEditDialog {
     $dialogResult = $GrpWindow.ShowDialog()
 
     if ($dialogResult -eq $true) {
+        $type = if ($rdoTypePVE.IsChecked) { "proxmox" }
+                elseif ($rdoTypePDM.IsChecked) { "proxmox-pdm" }
+                else { "hyperv" }
+
         $result = @{
             Name           = $txtGrpName.Text.Trim()
+            Type           = $type
+            # Hyper-V fields
             UseCurrentUser = ($rdoCurrentUser.IsChecked -eq $true)
             Username       = $null
             SecurePassword = $null
+            # Proxmox fields
+            Port           = 0
+            PveAuthType    = $null
+            PveTokenId     = $null
+            PveTokenSecret = $null
+            PveUsername    = $null
+            PveSecurePassword = $null
         }
-        if (-not $result.UseCurrentUser) {
-            $result.Username = $txtGrpUser.Text.Trim()
-            $result.SecurePassword = $txtGrpPass.SecurePassword
+
+        if ($type -eq "hyperv") {
+            if (-not $result.UseCurrentUser) {
+                $result.Username = $txtGrpUser.Text.Trim()
+                $result.SecurePassword = $txtGrpPass.SecurePassword
+            }
+        } else {
+            $portVal = 0
+            if ([int]::TryParse($txtPvePort.Text.Trim(), [ref]$portVal)) {
+                $result.Port = $portVal
+            } else {
+                $result.Port = if ($type -eq "proxmox-pdm") { 8443 } else { 8006 }
+            }
+            if ($rdoPveToken.IsChecked) {
+                $result.PveAuthType = "token"
+                $result.PveTokenId = $txtPveTokenId.Text.Trim()
+                $result.PveTokenSecret = $txtPveTokenSecret.SecurePassword
+            } else {
+                $result.PveAuthType = "password"
+                $result.PveUsername = $txtPveUser.Text.Trim()
+                $result.PveSecurePassword = $txtPvePass.SecurePassword
+            }
         }
         return $result
     }
@@ -730,11 +988,16 @@ function Show-ManageGroupsDialog {
         $config = Load-Config
         foreach ($g in @($config.groups)) {
             $hostCount = @($g.hosts).Count
-            $authLabel = if ($g.useCurrentUser) { "Current User" }
+            $gType = if ($g.type -eq "proxmox") { "PVE" }
+                     elseif ($g.type -eq "proxmox-pdm") { "PDM" }
+                     else { "HV" }
+            $authLabel = if ($g.type -in @("proxmox","proxmox-pdm") -and $g.pveAuthType -eq "token") { "API Token" }
+                         elseif ($g.type -in @("proxmox","proxmox-pdm") -and $g.pveUsername) { $g.pveUsername }
+                         elseif ($g.useCurrentUser) { "Current User" }
                          elseif ($g.username) { $g.username }
                          else { "No creds" }
             $item = [System.Windows.Controls.ListBoxItem]::new()
-            $item.Content = "$($g.name)  ($hostCount hosts, $authLabel)"
+            $item.Content = "[$gType] $($g.name)  ($hostCount hosts, $authLabel)"
             $item.Tag = $g.name
             $item.Foreground = New-DarkBrush "#cdd6f4"
             $item.FontSize = 13
@@ -757,10 +1020,15 @@ function Show-ManageGroupsDialog {
         $group = $config.groups | Where-Object { $_.name -eq $groupName } | Select-Object -First 1
         if (-not $group) { return }
 
-        $authLabel = if ($group.useCurrentUser) { "Current User (Kerberos)" }
+        $gType = if ($group.type -eq "proxmox") { "Proxmox VE" }
+                 elseif ($group.type -eq "proxmox-pdm") { "Proxmox PDM" }
+                 else { "Hyper-V" }
+        $authLabel = if ($group.type -in @("proxmox","proxmox-pdm") -and $group.pveAuthType -eq "token") { "API Token: $($group.pveTokenId)" }
+                     elseif ($group.type -in @("proxmox","proxmox-pdm") -and $group.pveUsername) { "User: $($group.pveUsername)" }
+                     elseif ($group.useCurrentUser) { "Current User (Kerberos)" }
                      elseif ($group.username) { "Credentials: $($group.username)" }
                      else { "No credentials saved" }
-        $txtGroupDetail.Text = "Hosts in '$groupName' — $authLabel"
+        $txtGroupDetail.Text = "[$gType] Hosts in '$groupName' -- $authLabel"
 
         foreach ($h in @($group.hosts)) {
             $item = [System.Windows.Controls.ListBoxItem]::new()
@@ -785,7 +1053,6 @@ function Show-ManageGroupsDialog {
         $result = Show-GroupEditDialog
         if ($result) {
             $config = Load-Config
-            # Check for duplicate name
             $existing = $config.groups | Where-Object { $_.name -eq $result.Name }
             if ($existing) {
                 [System.Windows.MessageBox]::Show("A group named '$($result.Name)' already exists.",
@@ -793,14 +1060,27 @@ function Show-ManageGroupsDialog {
                 return
             }
             $newGroup = [PSCustomObject]@{
-                name              = $result.Name
-                useCurrentUser    = $result.UseCurrentUser
-                username          = $result.Username
-                encryptedPassword = $null
-                hosts             = @()
+                name                    = $result.Name
+                type                    = $result.Type
+                useCurrentUser          = $result.UseCurrentUser
+                username                = $result.Username
+                encryptedPassword       = $null
+                port                    = $result.Port
+                pveAuthType             = $result.PveAuthType
+                pveTokenId              = $result.PveTokenId
+                encryptedPveTokenSecret = $null
+                pveUsername             = $result.PveUsername
+                encryptedPvePassword    = $null
+                hosts                   = @()
             }
             if ($result.SecurePassword -and $result.SecurePassword.Length -gt 0) {
                 $newGroup.encryptedPassword = ($result.SecurePassword | ConvertFrom-SecureString)
+            }
+            if ($result.PveTokenSecret -and $result.PveTokenSecret.Length -gt 0) {
+                $newGroup.encryptedPveTokenSecret = ($result.PveTokenSecret | ConvertFrom-SecureString)
+            }
+            if ($result.PveSecurePassword -and $result.PveSecurePassword.Length -gt 0) {
+                $newGroup.encryptedPvePassword = ($result.PveSecurePassword | ConvertFrom-SecureString)
             }
             $config.groups = @($config.groups) + @($newGroup)
             Save-Config $config
@@ -821,17 +1101,35 @@ function Show-ManageGroupsDialog {
         $group = $config.groups | Where-Object { $_.name -eq $groupName } | Select-Object -First 1
         if (-not $group) { return }
 
-        $result = Show-GroupEditDialog -GroupName $group.name -Username $group.username `
-            -UseCurrentUser ([bool]$group.useCurrentUser)
+        $editType = if ($group.type) { $group.type } else { "hyperv" }
+        $editUser = if ($editType -eq "hyperv") { $group.username } else { $group.pveUsername }
+        $editPort = if ($group.port) { [int]$group.port } else { 0 }
+        $editPveAuth = if ($group.pveAuthType) { $group.pveAuthType } else { "token" }
+        $editTokenId = if ($group.pveTokenId) { $group.pveTokenId } else { "" }
+
+        $result = Show-GroupEditDialog -GroupName $group.name -GroupType $editType `
+            -Username $editUser -UseCurrentUser ([bool]$group.useCurrentUser) `
+            -Port $editPort -PveAuthType $editPveAuth -PveTokenId $editTokenId
         if ($result) {
             $group.name = $result.Name
+            $group.type = $result.Type
             $group.useCurrentUser = $result.UseCurrentUser
             $group.username = $result.Username
+            $group.port = $result.Port
+            $group.pveAuthType = $result.PveAuthType
+            $group.pveTokenId = $result.PveTokenId
+            $group.pveUsername = $result.PveUsername
             if ($result.SecurePassword -and $result.SecurePassword.Length -gt 0) {
                 $group.encryptedPassword = ($result.SecurePassword | ConvertFrom-SecureString)
             } elseif ($result.UseCurrentUser) {
                 $group.encryptedPassword = $null
                 $group.username = $null
+            }
+            if ($result.PveTokenSecret -and $result.PveTokenSecret.Length -gt 0) {
+                $group.encryptedPveTokenSecret = ($result.PveTokenSecret | ConvertFrom-SecureString)
+            }
+            if ($result.PveSecurePassword -and $result.PveSecurePassword.Length -gt 0) {
+                $group.encryptedPvePassword = ($result.PveSecurePassword | ConvertFrom-SecureString)
             }
             Save-Config $config
             & $refreshGroups
@@ -1059,13 +1357,15 @@ function Show-BulkConnectDialog {
         if ($groupHosts.Count -eq 0) { continue }
         $groupedAddresses += $groupHosts
 
-        $authLabel = if ($g.useCurrentUser) { "Current User" }
+        $gTypeLabel = switch ($g.type) { "proxmox" { "PVE" } "proxmox-pdm" { "PDM" } default { "HV" } }
+        $authLabel = if ($g.type -in @("proxmox","proxmox-pdm") -and $g.pveAuthType -eq "token") { "API Token" }
+                     elseif ($g.type -in @("proxmox","proxmox-pdm") -and $g.pveUsername) { $g.pveUsername }
+                     elseif ($g.useCurrentUser) { "Current User" }
                      elseif ($g.username) { $g.username }
                      else { "No creds" }
 
-        # Group header
         $header = [System.Windows.Controls.TextBlock]::new()
-        $header.Text = "$($g.name) — $authLabel"
+        $header.Text = "[$gTypeLabel] $($g.name) -- $authLabel"
         $header.FontSize = 14
         $header.FontWeight = [System.Windows.FontWeights]::SemiBold
         $header.Foreground = New-DarkBrush "#cba6f7"
@@ -1114,7 +1414,7 @@ function Show-BulkConnectDialog {
             $cb.Foreground = New-DarkBrush "#cdd6f4"
             $cb.FontSize = 13
             $cb.Tag = $h.address
-            $label = "$($h.address)  —  $authInfo  —  $lastDate"
+            $label = "$($h.address)  --  $authInfo  --  $lastDate"
             if ($alreadyConnected) { $label += "  (already connected)" }
             $cb.Content = $label
             $hostListPanel.Children.Add($cb) | Out-Null
@@ -1181,12 +1481,24 @@ function Show-HistoryMenu {
         $emptyItem.Foreground = New-DarkBrush "#a6adc8"
         $menu.Items.Add($emptyItem) | Out-Null
     } else {
+        $localCmbHostType = $cmbHostType
+
         foreach ($h in $hostList) {
-            # Check group membership
             $group = Get-GroupForHost -Address $h.address
             $groupTag = if ($group) { " [$($group.name)]" } else { "" }
 
-            $authTag = if ($group -and -not $group.useCurrentUser -and $group.username) { "[Group: $($group.username)]" }
+            $hType = if ($group -and $group.type) { $group.type }
+                     elseif ($h.type) { $h.type }
+                     else { "hyperv" }
+            $typeTag = switch ($hType) {
+                "proxmox"     { "[PVE]" }
+                "proxmox-pdm" { "[PDM]" }
+                default       { "[HV]" }
+            }
+
+            $authTag = if ($hType -in @("proxmox","proxmox-pdm") -and $group -and $group.pveAuthType -eq "token") { "[API Token]" }
+                       elseif ($hType -in @("proxmox","proxmox-pdm") -and $group -and $group.pveUsername) { "[$($group.pveUsername)]" }
+                       elseif ($group -and -not $group.useCurrentUser -and $group.username) { "[Group: $($group.username)]" }
                        elseif ($group -and $group.useCurrentUser) { "[Group: Current User]" }
                        elseif ($h.useCurrentUser) { "[Current User]" }
                        elseif ($h.username) { "[$($h.username)]" }
@@ -1194,7 +1506,7 @@ function Show-HistoryMenu {
             $lastDate = try { ([datetime]$h.lastConnected).ToString("MM/dd HH:mm") } catch { "" }
 
             $item = [System.Windows.Controls.MenuItem]::new()
-            $item.Header = "$($h.address)$groupTag  $authTag  $lastDate"
+            $item.Header = "$typeTag $($h.address)$groupTag  $authTag  $lastDate"
             $item.Tag = $h.address
             $item.Foreground = New-DarkBrush "#cdd6f4"
             $item.Background = New-DarkBrush "#313244"
@@ -1202,9 +1514,11 @@ function Show-HistoryMenu {
             $hostAddress = $h.address
             $hostUseCurrentUser = [bool]$h.useCurrentUser
             if ($group) { $hostUseCurrentUser = [bool]$group.useCurrentUser }
+            $hostTypeIdx = switch ($hType) { "proxmox" { 1 } "proxmox-pdm" { 2 } default { 0 } }
             $item.Add_Click({
                 $localTxtHost.Text = $hostAddress
                 $localChkCurrentUser.IsChecked = $hostUseCurrentUser
+                $localCmbHostType.SelectedIndex = $hostTypeIdx
             }.GetNewClosure())
 
             $menu.Items.Add($item) | Out-Null
@@ -1256,7 +1570,7 @@ function Connect-HyperVHost {
 
     if ($script:ConnectedHosts.ContainsKey($TargetHost)) {
         if (-not $SkipPrompts) {
-            [System.Windows.MessageBox]::Show("Host '$TargetHost' is already connected.", "HyperV Explorer",
+            [System.Windows.MessageBox]::Show("Host '$TargetHost' is already connected.", "Hypervisor Explorer",
                 [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
         }
         return $false
@@ -1292,7 +1606,7 @@ function Connect-HyperVHost {
         }
         return $false
     }
-    Set-Status "Ping OK — checking WinRM on $TargetHost ..." "#89b4fa"
+    Set-Status "Ping OK -- checking WinRM on $TargetHost ..." "#89b4fa"
     $Window.Dispatcher.Invoke([Action]{}, 'Background')
 
     # Detect IP address
@@ -1389,7 +1703,7 @@ function Connect-HyperVHost {
                         [System.Windows.MessageBoxImage]::Question)
                     if ($AddTrust -ne 'Yes') {
                         Show-Progress $false
-                        Set-Status "Connection cancelled — TrustedHosts not updated." "#f9e2af"
+                        Set-Status "Connection cancelled -- TrustedHosts not updated." "#f9e2af"
                         return $false
                     }
                 }
@@ -1402,7 +1716,7 @@ function Connect-HyperVHost {
         catch {
             if (-not $SkipPrompts) {
                 [System.Windows.MessageBox]::Show(
-                    "Could not check/update TrustedHosts.`n`nError: $($_.Exception.Message)`n`nTry running HyperV Explorer as Administrator, or use a hostname instead of an IP.",
+                    "Could not check/update TrustedHosts.`n`nError: $($_.Exception.Message)`n`nTry running Hypervisor Explorer as Administrator, or use a hostname instead of an IP.",
                     "TrustedHosts Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
             }
             Show-Progress $false
@@ -1427,7 +1741,7 @@ function Connect-HyperVHost {
     }
 
     # WinRM authentication test
-    Set-Status "WinRM port open — testing authentication on $TargetHost ..." "#89b4fa"
+    Set-Status "WinRM port open -- testing authentication on $TargetHost ..." "#89b4fa"
     $Window.Dispatcher.Invoke([Action]{}, 'Background')
 
     $WinRMParams = @{ ComputerName = $TargetHost; ErrorAction = 'Stop' }
@@ -1449,7 +1763,7 @@ function Connect-HyperVHost {
         return $false
     }
 
-    Set-Status "WinRM OK — collecting Hyper-V data from $TargetHost ..." "#89b4fa"
+    Set-Status "WinRM OK -- collecting Hyper-V data from $TargetHost ..." "#89b4fa"
     $Window.Dispatcher.Invoke([Action]{}, 'Background')
 
     # Connect and collect
@@ -1457,7 +1771,7 @@ function Connect-HyperVHost {
         $Results = Invoke-Command @InvokeParams
 
         if ($null -eq $Results -or @($Results).Count -eq 0) {
-            Set-Status "Connected to $TargetHost — no VMs found on this host." "#f9e2af"
+            Set-Status "Connected to $TargetHost -- no VMs found on this host." "#f9e2af"
             $script:ConnectedHosts[$TargetHost] = @{ Credential = $Credential; VMCount = 0 }
         } else {
             $Count = @($Results).Count
@@ -1465,7 +1779,7 @@ function Connect-HyperVHost {
                 $script:VMData.Add($VM)
             }
             $script:ConnectedHosts[$TargetHost] = @{ Credential = $Credential; VMCount = $Count }
-            Set-Status "Connected to $TargetHost — $Count VMs loaded." "#a6e3a1"
+            Set-Status "Connected to $TargetHost -- $Count VMs loaded." "#a6e3a1"
         }
 
         # Save to history on successful connection
@@ -1485,6 +1799,441 @@ function Connect-HyperVHost {
         return $false
     }
     finally {
+        Show-Progress $false
+        Update-StatusBar
+    }
+}
+
+# ---- Proxmox VE helper: build auth headers ----
+function Get-PveAuthHeaders {
+    param(
+        [string]$BaseUrl,
+        [string]$AuthType,
+        [string]$TokenId,
+        [System.Security.SecureString]$TokenSecret,
+        [string]$Username,
+        [System.Security.SecureString]$Password
+    )
+
+    if ($AuthType -eq "token") {
+        $plainSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
+            [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($TokenSecret))
+        return @{
+            Headers = @{ "Authorization" = "PVEAPIToken=$TokenId=$plainSecret" }
+        }
+    } else {
+        # Password-based: get a ticket
+        $plainPass = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
+            [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Password))
+        $body = @{ username = $Username; password = $plainPass }
+        $ticketResponse = Invoke-RestMethod -Uri "$BaseUrl/api2/json/access/ticket" -Method POST -Body $body
+        $ticket = $ticketResponse.data.ticket
+        $csrf = $ticketResponse.data.CSRFPreventionToken
+        return @{
+            Headers = @{ "CSRFPreventionToken" = $csrf; "Cookie" = "PVEAuthCookie=$ticket" }
+        }
+    }
+}
+
+# ---- Proxmox VE helper: decrypt group credentials ----
+function Get-PveGroupAuth {
+    param($Group)
+    $authType = if ($Group.pveAuthType) { $Group.pveAuthType } else { "token" }
+    $result = @{ AuthType = $authType; TokenId = $null; TokenSecret = $null; Username = $null; Password = $null }
+
+    if ($authType -eq "token") {
+        $result.TokenId = $Group.pveTokenId
+        if ($Group.encryptedPveTokenSecret) {
+            try { $result.TokenSecret = $Group.encryptedPveTokenSecret | ConvertTo-SecureString }
+            catch { }
+        }
+    } else {
+        $result.Username = $Group.pveUsername
+        if ($Group.encryptedPvePassword) {
+            try { $result.Password = $Group.encryptedPvePassword | ConvertTo-SecureString }
+            catch { }
+        }
+    }
+    return $result
+}
+
+# ---- Proxmox VE helper: parse NIC config string ----
+function Format-PveNic {
+    param([string]$Key, [string]$Value)
+    # e.g. net0 = "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0,firewall=1"
+    $parts = @{}
+    foreach ($seg in ($Value -split ',')) {
+        $kv = $seg -split '=', 2
+        if ($kv.Count -eq 2) { $parts[$kv[0].Trim()] = $kv[1].Trim() }
+        elseif ($kv[0] -match ':') { $parts['mac'] = $kv[0].Trim() }
+    }
+    $model = ($parts.Keys | Where-Object { $_ -match 'virtio|e1000|vmxnet3|rtl' } | Select-Object -First 1)
+    if (-not $model) { $model = "nic" }
+    $mac = if ($parts['mac']) { $parts['mac'] } elseif ($parts[$model]) { $parts[$model] } else { "?" }
+    $bridge = if ($parts['bridge']) { $parts['bridge'] } else { "?" }
+    "$Key [$model Bridge: $bridge, MAC: $mac]"
+}
+
+# ---- Proxmox VE helper: parse disk config string ----
+function Format-PveDisk {
+    param([string]$Key, [string]$Value)
+    # e.g. scsi0 = "local-lvm:vm-100-disk-0,size=32G"
+    $parts = $Value -split ','
+    $storage = $parts[0].Trim()
+    $sizeStr = ($parts | Where-Object { $_ -match 'size=' }) -replace 'size=', ''
+    if (-not $sizeStr) { $sizeStr = "?" }
+    "$Key`: $storage (Size: $sizeStr)"
+}
+
+# ---- Connect to a Proxmox VE cluster node ----
+function Connect-ProxmoxHost {
+    param(
+        [string]$TargetHost,
+        [int]$Port = 8006,
+        [string]$AuthType = "token",
+        [string]$TokenId,
+        [System.Security.SecureString]$TokenSecret,
+        [string]$Username,
+        [System.Security.SecureString]$Password,
+        [bool]$SkipPrompts = $false,
+        [string]$PlatformLabel = "Proxmox"
+    )
+
+    if ([string]::IsNullOrWhiteSpace($TargetHost)) { return $false }
+
+    if ($script:ConnectedHosts.ContainsKey($TargetHost)) {
+        if (-not $SkipPrompts) {
+            [System.Windows.MessageBox]::Show("Host '$TargetHost' is already connected.", "Hypervisor Explorer",
+                [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+        }
+        return $false
+    }
+
+    $BaseUrl = "https://$($TargetHost):$Port"
+    Set-Status "Connecting to $TargetHost (Proxmox $Port)..." "#89b4fa"
+    Show-Progress $true
+
+    # Temporarily bypass SSL for self-signed certs
+    $originalPolicy = [System.Net.ServicePointManager]::CertificatePolicy
+    [System.Net.ServicePointManager]::CertificatePolicy = [TrustAllCertsPolicy]::new()
+
+    try {
+        # Test TCP port
+        Set-Status "Testing port $Port on $TargetHost..." "#89b4fa"
+        $Window.Dispatcher.Invoke([Action]{}, 'Background')
+        $tcp = [System.Net.Sockets.TcpClient]::new()
+        try {
+            $tcp.Connect($TargetHost, $Port)
+            $tcp.Close()
+        } catch {
+            if (-not $SkipPrompts) {
+                [System.Windows.MessageBox]::Show(
+                    "Cannot reach $($TargetHost):$Port`n`n$($_.Exception.Message)",
+                    "Connection Failed", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            }
+            return $false
+        }
+
+        # Authenticate
+        Set-Status "Authenticating to $TargetHost..." "#89b4fa"
+        $Window.Dispatcher.Invoke([Action]{}, 'Background')
+        $auth = Get-PveAuthHeaders -BaseUrl $BaseUrl -AuthType $AuthType `
+            -TokenId $TokenId -TokenSecret $TokenSecret -Username $Username -Password $Password
+        $headers = $auth.Headers
+
+        # Helper for API calls
+        $apiGet = {
+            param([string]$Path)
+            (Invoke-RestMethod -Uri "$BaseUrl$Path" -Headers $headers -Method GET).data
+        }
+
+        # Get cluster nodes
+        Set-Status "Discovering nodes on $TargetHost..." "#89b4fa"
+        $Window.Dispatcher.Invoke([Action]{}, 'Background')
+        $nodes = & $apiGet "/api2/json/nodes"
+        $totalVMs = 0
+
+        foreach ($node in $nodes) {
+            $nodeName = $node.node
+
+            # Get node status for host info
+            Set-Status "Collecting node info: $nodeName..." "#89b4fa"
+            $Window.Dispatcher.Invoke([Action]{}, 'Background')
+            $nodeStatus = & $apiGet "/api2/json/nodes/$nodeName/status"
+
+            $hostCPU = $nodeStatus.cpuinfo.cpus
+            $hostMemGB = [math]::Round($nodeStatus.memory.total / 1GB, 2)
+            $hostVersion = $nodeStatus.pveversion
+            if (-not $hostVersion) { $hostVersion = "PVE" }
+
+            # Get QEMU VMs on this node
+            Set-Status "Collecting VMs from $nodeName..." "#89b4fa"
+            $Window.Dispatcher.Invoke([Action]{}, 'Background')
+            $vms = & $apiGet "/api2/json/nodes/$nodeName/qemu"
+
+            foreach ($vm in $vms) {
+                $vmid = $vm.vmid
+                $vmName = $vm.name
+
+                # Get VM config
+                $vmConfig = & $apiGet "/api2/json/nodes/$nodeName/qemu/$vmid/config"
+
+                # Get VM runtime status
+                $vmStatus = & $apiGet "/api2/json/nodes/$nodeName/qemu/$vmid/status/current"
+
+                # CPU: cores * sockets
+                $cores = if ($vmConfig.cores) { [int]$vmConfig.cores } else { 1 }
+                $sockets = if ($vmConfig.sockets) { [int]$vmConfig.sockets } else { 1 }
+                $cpuCount = $cores * $sockets
+
+                # Memory
+                $memMB = if ($vmConfig.memory) { [int]$vmConfig.memory } else { 0 }
+
+                # State
+                $state = if ($vmStatus.status) { $vmStatus.status } else { $vm.status }
+
+                # Uptime
+                $uptimeSec = if ($vmStatus.uptime) { [int]$vmStatus.uptime } else { 0 }
+                $uptimeStr = if ($uptimeSec -gt 0) {
+                    $ts = [TimeSpan]::FromSeconds($uptimeSec)
+                    "{0:D2}:{1:D2}:{2:D2}:{3:D2}" -f $ts.Days, $ts.Hours, $ts.Minutes, $ts.Seconds
+                } else { "00:00:00:00" }
+
+                # Balloon (dynamic memory)
+                $balloon = if ($vmConfig.balloon -ne $null -and $vmConfig.balloon -ne 0) { "True" } else { "False" }
+
+                # NICs
+                $nics = @()
+                foreach ($key in ($vmConfig.PSObject.Properties.Name | Where-Object { $_ -match '^net\d+$' } | Sort-Object)) {
+                    $nics += Format-PveNic -Key $key -Value $vmConfig.$key
+                }
+                $nicStr = if ($nics.Count -gt 0) { $nics -join "; " } else { "None" }
+
+                # Disks
+                $disks = @()
+                foreach ($key in ($vmConfig.PSObject.Properties.Name | Where-Object { $_ -match '^(scsi|virtio|ide|sata)\d+$' } | Sort-Object)) {
+                    $val = $vmConfig.$key
+                    if ($val -notmatch 'media=cdrom|cloudinit') {
+                        $disks += Format-PveDisk -Key $key -Value $val
+                    }
+                }
+                $diskStr = if ($disks.Count -gt 0) { $disks -join "; " } else { "None" }
+
+                # Snapshots
+                try {
+                    $snaps = & $apiGet "/api2/json/nodes/$nodeName/qemu/$vmid/snapshot"
+                    $snapNames = ($snaps | Where-Object { $_.name -ne 'current' } | ForEach-Object { $_.name }) -join "; "
+                    if (-not $snapNames) { $snapNames = "None" }
+                } catch { $snapNames = "None" }
+
+                # QEMU Guest Agent
+                $agent = if ($vmConfig.agent -and $vmConfig.agent -match '1') { "Agent enabled" } else { "No agent" }
+
+                $vmObj = [PSCustomObject]@{
+                    Platform            = $PlatformLabel
+                    HostName            = $nodeName
+                    HostCPU             = $hostCPU
+                    HostMemoryGB        = $hostMemGB
+                    HostVersion         = "$hostVersion"
+                    VMName              = $vmName
+                    State               = $state
+                    CPUCount            = $cpuCount
+                    MemoryAssignedMB    = $memMB
+                    Uptime              = $uptimeStr
+                    Generation          = "KVM"
+                    DynamicMemory       = $balloon
+                    NICs                = $nicStr
+                    Disks               = $diskStr
+                    Checkpoints         = $snapNames
+                    IntegrationServices = $agent
+                }
+                $script:VMData.Add($vmObj)
+                $totalVMs++
+            }
+        }
+
+        # Track connection
+        $nodeNames = ($nodes | ForEach-Object { $_.node }) -join ", "
+        $script:ConnectedHosts[$TargetHost] = @{
+            Type      = "proxmox"
+            VMCount   = $totalVMs
+            NodeNames = $nodeNames
+        }
+
+        Set-Status "Connected to $TargetHost -- $totalVMs VMs across $($nodes.Count) node(s) ($nodeNames)." "#a6e3a1"
+        return $true
+    }
+    catch {
+        $errMsg = $_.Exception.Message
+        if (-not $SkipPrompts) {
+            [System.Windows.MessageBox]::Show(
+                "Failed to connect to $($TargetHost):$Port`n`n$errMsg",
+                "Connection Failed", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+        } else {
+            Set-Status "Failed: $TargetHost -- $errMsg" "#f38ba8"
+        }
+        return $false
+    }
+    finally {
+        [System.Net.ServicePointManager]::CertificatePolicy = $originalPolicy
+        Show-Progress $false
+        Update-StatusBar
+    }
+}
+
+# ---- Connect to Proxmox Datacenter Manager ----
+function Connect-ProxmoxPDM {
+    param(
+        [string]$TargetHost,
+        [int]$Port = 8443,
+        [string]$AuthType = "token",
+        [string]$TokenId,
+        [System.Security.SecureString]$TokenSecret,
+        [string]$Username,
+        [System.Security.SecureString]$Password,
+        [bool]$SkipPrompts = $false
+    )
+
+    if ([string]::IsNullOrWhiteSpace($TargetHost)) { return $false }
+
+    if ($script:ConnectedHosts.ContainsKey($TargetHost)) {
+        if (-not $SkipPrompts) {
+            [System.Windows.MessageBox]::Show("PDM '$TargetHost' is already connected.", "Hypervisor Explorer",
+                [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+        }
+        return $false
+    }
+
+    $BaseUrl = "https://$($TargetHost):$Port"
+    Set-Status "Connecting to PDM $TargetHost`:$Port..." "#f9e2af"
+    Show-Progress $true
+
+    $originalPolicy = [System.Net.ServicePointManager]::CertificatePolicy
+    [System.Net.ServicePointManager]::CertificatePolicy = [TrustAllCertsPolicy]::new()
+
+    try {
+        # Test TCP port
+        $tcp = [System.Net.Sockets.TcpClient]::new()
+        try {
+            $tcp.Connect($TargetHost, $Port)
+            $tcp.Close()
+        } catch {
+            if (-not $SkipPrompts) {
+                [System.Windows.MessageBox]::Show(
+                    "Cannot reach $($TargetHost):$Port`n`n$($_.Exception.Message)",
+                    "Connection Failed", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            }
+            return $false
+        }
+
+        # Authenticate
+        Set-Status "Authenticating to PDM $TargetHost..." "#f9e2af"
+        $Window.Dispatcher.Invoke([Action]{}, 'Background')
+        $auth = Get-PveAuthHeaders -BaseUrl $BaseUrl -AuthType $AuthType `
+            -TokenId $TokenId -TokenSecret $TokenSecret -Username $Username -Password $Password
+        $headers = $auth.Headers
+
+        $apiGet = {
+            param([string]$Path)
+            (Invoke-RestMethod -Uri "$BaseUrl$Path" -Headers $headers -Method GET).data
+        }
+
+        # PDM: enumerate remotes (managed PVE clusters)
+        Set-Status "Discovering managed clusters on PDM..." "#f9e2af"
+        $Window.Dispatcher.Invoke([Action]{}, 'Background')
+
+        $remotes = $null
+        try {
+            $remotes = & $apiGet "/api2/json/remotes"
+        } catch {
+            # Fallback: try resources endpoint directly (some PDM versions)
+            try {
+                $remotes = & $apiGet "/api2/json/resources"
+            } catch { }
+        }
+
+        if (-not $remotes) {
+            # PDM may expose a different API structure -- try fetching as standard PVE
+            Set-Status "PDM remotes API unavailable, trying standard PVE API on PDM..." "#f9e2af"
+            $Window.Dispatcher.Invoke([Action]{}, 'Background')
+
+            $result = Connect-ProxmoxHost -TargetHost $TargetHost -Port $Port `
+                -AuthType $AuthType -TokenId $TokenId -TokenSecret $TokenSecret `
+                -Username $Username -Password $Password -SkipPrompts $SkipPrompts `
+                -PlatformLabel "Proxmox (PDM)"
+            return $result
+        }
+
+        # PDM has remotes -- iterate each managed cluster
+        $totalVMs = 0
+        $clusterNames = @()
+
+        foreach ($remote in $remotes) {
+            $remoteName = if ($remote.name) { $remote.name } else { $remote.id }
+            $clusterNames += $remoteName
+            Set-Status "Collecting VMs from cluster: $remoteName..." "#f9e2af"
+            $Window.Dispatcher.Invoke([Action]{}, 'Background')
+
+            try {
+                # Try to get resources from this remote via PDM proxy
+                $resources = & $apiGet "/api2/json/remotes/$remoteName/qemu"
+                if (-not $resources) {
+                    $resources = & $apiGet "/api2/json/remotes/$remoteName/resources?type=vm"
+                }
+
+                foreach ($vm in $resources) {
+                    $vmObj = [PSCustomObject]@{
+                        Platform            = "Proxmox (PDM)"
+                        HostName            = if ($vm.node) { "$remoteName/$($vm.node)" } else { $remoteName }
+                        HostCPU             = if ($vm.maxcpu) { $vm.maxcpu } else { "" }
+                        HostMemoryGB        = if ($vm.maxmem) { [math]::Round($vm.maxmem / 1GB, 2) } else { "" }
+                        HostVersion         = "PDM"
+                        VMName              = if ($vm.name) { $vm.name } else { "VM $($vm.vmid)" }
+                        State               = if ($vm.status) { $vm.status } else { "unknown" }
+                        CPUCount            = if ($vm.maxcpu) { $vm.maxcpu } else { "" }
+                        MemoryAssignedMB    = if ($vm.maxmem) { [math]::Round($vm.maxmem / 1MB, 2) } else { "" }
+                        Uptime              = if ($vm.uptime) {
+                            $ts = [TimeSpan]::FromSeconds([int]$vm.uptime)
+                            "{0:D2}:{1:D2}:{2:D2}:{3:D2}" -f $ts.Days, $ts.Hours, $ts.Minutes, $ts.Seconds
+                        } else { "00:00:00:00" }
+                        Generation          = "KVM"
+                        DynamicMemory       = ""
+                        NICs                = ""
+                        Disks               = ""
+                        Checkpoints         = ""
+                        IntegrationServices = ""
+                    }
+                    $script:VMData.Add($vmObj)
+                    $totalVMs++
+                }
+            } catch {
+                Set-Status "Warning: Could not collect from cluster '$remoteName': $($_.Exception.Message)" "#f9e2af"
+                $Window.Dispatcher.Invoke([Action]{}, 'Background')
+            }
+        }
+
+        $script:ConnectedHosts[$TargetHost] = @{
+            Type      = "proxmox-pdm"
+            VMCount   = $totalVMs
+            Clusters  = $clusterNames -join ", "
+        }
+
+        Set-Status "Connected to PDM $TargetHost -- $totalVMs VMs across $($clusterNames.Count) cluster(s)." "#a6e3a1"
+        return $true
+    }
+    catch {
+        $errMsg = $_.Exception.Message
+        if (-not $SkipPrompts) {
+            [System.Windows.MessageBox]::Show(
+                "Failed to connect to PDM $($TargetHost):$Port`n`n$errMsg",
+                "Connection Failed", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+        } else {
+            Set-Status "Failed: PDM $TargetHost -- $errMsg" "#f38ba8"
+        }
+        return $false
+    }
+    finally {
+        [System.Net.ServicePointManager]::CertificatePolicy = $originalPolicy
         Show-Progress $false
         Update-StatusBar
     }
@@ -1522,6 +2271,7 @@ $CollectionScript = {
         $IntegrationServices = $VM.IntegrationServicesVersion
 
         [PSCustomObject]@{
+            Platform            = "Hyper-V"
             HostName            = $HostName
             HostCPU             = $HostCPU
             HostMemoryGB        = $HostMemory
@@ -1541,19 +2291,153 @@ $CollectionScript = {
     }
 }
 
-# ---- Connect button ----
+# ---- PVE credential prompt for ad-hoc connections ----
+function Show-PveCredentialDialog {
+    param([string]$TargetHost, [int]$DefaultPort = 8006)
+
+    [xml]$PcXAML = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Proxmox Credentials" Width="450" Height="320"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="#1e1e2e">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock Grid.Row="0" Text="Credentials for $TargetHost" Foreground="#cdd6f4" FontSize="14"
+                   FontWeight="SemiBold" Margin="0,0,0,12"/>
+        <Grid Grid.Row="1" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="100"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <TextBlock Text="Port:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
+            <TextBox x:Name="txtPort" Grid.Column="1" Width="80" HorizontalAlignment="Left" FontSize="13"
+                     Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a" Padding="8,6" CaretBrush="#cdd6f4"/>
+        </Grid>
+        <StackPanel Grid.Row="2" Margin="0,0,0,8">
+            <RadioButton x:Name="rdoToken" Content="API Token" GroupName="pAuth" Foreground="#cdd6f4" FontSize="13"
+                         Margin="0,0,0,4" IsChecked="True"/>
+            <RadioButton x:Name="rdoPass" Content="Username / Password" GroupName="pAuth" Foreground="#cdd6f4" FontSize="13"/>
+        </StackPanel>
+        <Grid Grid.Row="3" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="100"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <TextBlock x:Name="lblField1" Text="Token ID:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
+            <TextBox x:Name="txtField1" Grid.Column="1" FontSize="13"
+                     Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a" Padding="8,6" CaretBrush="#cdd6f4"/>
+        </Grid>
+        <Grid Grid.Row="4" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="100"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <TextBlock x:Name="lblField2" Text="Token Secret:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
+            <PasswordBox x:Name="txtField2" Grid.Column="1" FontSize="13"
+                         Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a" Padding="8,6" CaretBrush="#cdd6f4"/>
+        </Grid>
+        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="btnOK" Content="Connect" Width="90" Padding="8,6" Margin="0,0,8,0"
+                    Background="#364a63" Foreground="#89b4fa" FontSize="13" IsDefault="True"/>
+            <Button x:Name="btnCancel" Content="Cancel" Width="80" Padding="8,6"
+                    Background="#45475a" Foreground="#cdd6f4" FontSize="13" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
+"@
+    $PcReader = [System.Xml.XmlNodeReader]::new($PcXAML)
+    $PcWindow = [Windows.Markup.XamlReader]::Load($PcReader)
+    $PcWindow.Owner = $Window
+
+    $txtPort  = $PcWindow.FindName("txtPort")
+    $rdoToken = $PcWindow.FindName("rdoToken")
+    $rdoPass  = $PcWindow.FindName("rdoPass")
+    $lblField1 = $PcWindow.FindName("lblField1")
+    $lblField2 = $PcWindow.FindName("lblField2")
+    $txtField1 = $PcWindow.FindName("txtField1")
+    $txtField2 = $PcWindow.FindName("txtField2")
+    $btnOK     = $PcWindow.FindName("btnOK")
+    $btnCancel = $PcWindow.FindName("btnCancel")
+
+    $txtPort.Text = "$DefaultPort"
+
+    $rdoToken.Add_Checked({ $lblField1.Text = "Token ID:"; $lblField2.Text = "Token Secret:" }.GetNewClosure())
+    $rdoPass.Add_Checked({ $lblField1.Text = "Username:"; $lblField2.Text = "Password:" }.GetNewClosure())
+
+    $btnOK.Add_Click({ $PcWindow.DialogResult = $true }.GetNewClosure())
+    $btnCancel.Add_Click({ $PcWindow.DialogResult = $false }.GetNewClosure())
+
+    $txtField1.Focus() | Out-Null
+    if ($PcWindow.ShowDialog() -eq $true) {
+        $portVal = 0
+        if (-not [int]::TryParse($txtPort.Text.Trim(), [ref]$portVal)) { $portVal = $DefaultPort }
+        return @{
+            Port        = $portVal
+            AuthType    = if ($rdoToken.IsChecked) { "token" } else { "password" }
+            TokenId     = if ($rdoToken.IsChecked) { $txtField1.Text.Trim() } else { $null }
+            TokenSecret = if ($rdoToken.IsChecked) { $txtField2.SecurePassword } else { $null }
+            Username    = if ($rdoPass.IsChecked) { $txtField1.Text.Trim() } else { $null }
+            Password    = if ($rdoPass.IsChecked) { $txtField2.SecurePassword } else { $null }
+        }
+    }
+    return $null
+}
+
+# ---- Connect button (routes to correct hypervisor) ----
 $btnConnect.Add_Click({
     $TargetHost = $txtHost.Text.Trim()
     if ([string]::IsNullOrWhiteSpace($TargetHost)) {
-        [System.Windows.MessageBox]::Show("Please enter a hostname or IP address.", "HyperV Explorer",
+        [System.Windows.MessageBox]::Show("Please enter a hostname or IP address.", "Hypervisor Explorer",
             [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
         return
     }
 
     $btnConnect.IsEnabled = $false
     try {
-        $UseCurrentUser = $chkCurrentUser.IsChecked -eq $true
-        $result = Connect-HyperVHost -TargetHost $TargetHost -UseCurrentUser $UseCurrentUser
+        # Determine type: check group membership first, then toolbar selector
+        $hostGroup = Get-GroupForHost -Address $TargetHost
+        $hostType = if ($hostGroup -and $hostGroup.type) { $hostGroup.type }
+                    elseif ($cmbHostType.SelectedIndex -eq 1) { "proxmox" }
+                    elseif ($cmbHostType.SelectedIndex -eq 2) { "proxmox-pdm" }
+                    else { "hyperv" }
+
+        if ($hostType -eq "hyperv") {
+            $UseCurrentUser = $chkCurrentUser.IsChecked -eq $true
+            $result = Connect-HyperVHost -TargetHost $TargetHost -UseCurrentUser $UseCurrentUser
+        }
+        elseif ($hostType -in @("proxmox", "proxmox-pdm")) {
+            # Get credentials from group or prompt
+            $port = 0; $authType = $null; $tokenId = $null; $tokenSecret = $null
+            $pveUser = $null; $pvePass = $null
+
+            if ($hostGroup -and $hostGroup.type -in @("proxmox", "proxmox-pdm")) {
+                $pveAuth = Get-PveGroupAuth -Group $hostGroup
+                $port = if ($hostGroup.port) { [int]$hostGroup.port } else { if ($hostType -eq "proxmox-pdm") { 8443 } else { 8006 } }
+                $authType = $pveAuth.AuthType
+                $tokenId = $pveAuth.TokenId
+                $tokenSecret = $pveAuth.TokenSecret
+                $pveUser = $pveAuth.Username
+                $pvePass = $pveAuth.Password
+            } else {
+                $defaultPort = if ($hostType -eq "proxmox-pdm") { 8443 } else { 8006 }
+                $creds = Show-PveCredentialDialog -TargetHost $TargetHost -DefaultPort $defaultPort
+                if (-not $creds) { return }
+                $port = $creds.Port; $authType = $creds.AuthType
+                $tokenId = $creds.TokenId; $tokenSecret = $creds.TokenSecret
+                $pveUser = $creds.Username; $pvePass = $creds.Password
+            }
+
+            if ($hostType -eq "proxmox-pdm") {
+                $result = Connect-ProxmoxPDM -TargetHost $TargetHost -Port $port `
+                    -AuthType $authType -TokenId $tokenId -TokenSecret $tokenSecret `
+                    -Username $pveUser -Password $pvePass
+            } else {
+                $result = Connect-ProxmoxHost -TargetHost $TargetHost -Port $port `
+                    -AuthType $authType -TokenId $tokenId -TokenSecret $tokenSecret `
+                    -Username $pveUser -Password $pvePass
+            }
+        }
+
         if ($result) { $txtHost.Text = "" }
     }
     finally {
@@ -1575,30 +2459,48 @@ $btnBulkConnect.Add_Click({
 
     for ($i = 0; $i -lt $total; $i++) {
         $host_ = $selectedHosts[$i]
-        Set-Status "Bulk connect: $($i + 1) of $total — $host_ ..." "#89b4fa"
+        Set-Status "Bulk connect: $($i + 1) of $total -- $host_ ..." "#89b4fa"
         $Window.Dispatcher.Invoke([Action]{}, 'Background')
 
-        # Look up group credentials first, then per-host settings
         $hostGroup = Get-GroupForHost -Address $host_
-        $savedCred = $null
-        $useCurrentUser = $true
+        $groupType = if ($hostGroup -and $hostGroup.type) { $hostGroup.type } else { "hyperv" }
 
-        if ($hostGroup) {
-            $useCurrentUser = [bool]$hostGroup.useCurrentUser
-            if (-not $useCurrentUser) {
-                $savedCred = Get-GroupCredential -Group $hostGroup
+        if ($groupType -in @("proxmox", "proxmox-pdm")) {
+            # Proxmox connection
+            $pveAuth = Get-PveGroupAuth -Group $hostGroup
+            $port = if ($hostGroup.port) { [int]$hostGroup.port } else { if ($groupType -eq "proxmox-pdm") { 8443 } else { 8006 } }
+
+            if ($groupType -eq "proxmox-pdm") {
+                $result = Connect-ProxmoxPDM -TargetHost $host_ -Port $port `
+                    -AuthType $pveAuth.AuthType -TokenId $pveAuth.TokenId -TokenSecret $pveAuth.TokenSecret `
+                    -Username $pveAuth.Username -Password $pveAuth.Password -SkipPrompts $true
+            } else {
+                $result = Connect-ProxmoxHost -TargetHost $host_ -Port $port `
+                    -AuthType $pveAuth.AuthType -TokenId $pveAuth.TokenId -TokenSecret $pveAuth.TokenSecret `
+                    -Username $pveAuth.Username -Password $pveAuth.Password -SkipPrompts $true
             }
         } else {
-            $histEntry = Get-HostHistoryEntry -Address $host_
-            $useCurrentUser = if ($histEntry) { [bool]$histEntry.useCurrentUser } else { $true }
-            if (-not $useCurrentUser) {
-                $savedCred = Get-SavedCredential -Address $host_
-            }
-        }
+            # Hyper-V connection
+            $savedCred = $null
+            $useCurrentUser = $true
 
-        $result = Connect-HyperVHost -TargetHost $host_ -UseCurrentUser $useCurrentUser `
-            -ProvidedCredential $savedCred -RememberCredential ($null -ne $savedCred) `
-            -SkipPrompts $false
+            if ($hostGroup) {
+                $useCurrentUser = [bool]$hostGroup.useCurrentUser
+                if (-not $useCurrentUser) {
+                    $savedCred = Get-GroupCredential -Group $hostGroup
+                }
+            } else {
+                $histEntry = Get-HostHistoryEntry -Address $host_
+                $useCurrentUser = if ($histEntry) { [bool]$histEntry.useCurrentUser } else { $true }
+                if (-not $useCurrentUser) {
+                    $savedCred = Get-SavedCredential -Address $host_
+                }
+            }
+
+            $result = Connect-HyperVHost -TargetHost $host_ -UseCurrentUser $useCurrentUser `
+                -ProvidedCredential $savedCred -RememberCredential ($null -ne $savedCred) `
+                -SkipPrompts $true
+        }
 
         if ($result) { $success++ } else { $failed++ }
     }
@@ -1624,7 +2526,7 @@ $btnDisconnect.Add_Click({
     $SelectedItem = $dgVMs.SelectedItem
     if ($null -eq $SelectedItem) {
         [System.Windows.MessageBox]::Show("Select a VM row first to identify which host to disconnect.",
-            "HyperV Explorer", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
+            "Hypervisor Explorer", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
         return
     }
 
@@ -1651,7 +2553,7 @@ $btnDisconnectAll.Add_Click({
     $hostCount = $script:ConnectedHosts.Count
     if ($hostCount -eq 0) {
         [System.Windows.MessageBox]::Show("No hosts are currently connected.",
-            "HyperV Explorer", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+            "Hypervisor Explorer", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
         return
     }
 
