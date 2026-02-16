@@ -219,6 +219,75 @@ function Get-GroupCredential {
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
+
+        <Style TargetType="ComboBox">
+            <Setter Property="Foreground" Value="{StaticResource FgText}"/>
+            <Setter Property="Background" Value="{StaticResource BgMedium}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="ToggleButton" Focusable="False"
+                                IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                ClickMode="Press">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="#313244" BorderBrush="#45475a" BorderThickness="1" CornerRadius="4" Padding="8,6,4,6">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="20"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Path Grid.Column="1" Data="M0,0 L4,4 L8,0" Fill="#a6adc8"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </Border>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter Content="{TemplateBinding SelectionBoxItem}"
+                                ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                HorizontalAlignment="Left" VerticalAlignment="Center"
+                                Margin="10,6,24,6" IsHitTestVisible="False"/>
+                            <Popup x:Name="Popup" Placement="Bottom" AllowsTransparency="True"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}" Focusable="False" PopupAnimation="Slide">
+                                <Grid MinWidth="{TemplateBinding ActualWidth}" MaxHeight="200" SnapsToDevicePixels="True">
+                                    <Border Background="#313244" BorderBrush="#45475a" BorderThickness="1" CornerRadius="4" Padding="0,4">
+                                        <ScrollViewer SnapsToDevicePixels="True">
+                                            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                        </ScrollViewer>
+                                    </Border>
+                                </Grid>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="#313244"/>
+            <Setter Property="Foreground" Value="#cdd6f4"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#45475a"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#45475a"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -1847,15 +1916,13 @@ function Get-PveAuthHeaders {
     )
 
     if ($AuthType -eq "token") {
-        $plainSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
-            [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($TokenSecret))
+        $plainSecret = [System.Net.NetworkCredential]::new('', $TokenSecret).Password
         return @{
             Headers = @{ "Authorization" = "PVEAPIToken=$TokenId=$plainSecret" }
         }
     } else {
         # Password-based: get a ticket
-        $plainPass = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
-            [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Password))
+        $plainPass = [System.Net.NetworkCredential]::new('', $Password).Password
         $body = @{ username = $Username; password = $plainPass }
         $ticketResponse = Invoke-PveApi -Uri "$BaseUrl/api2/json/access/ticket" -Method POST -Body $body
         $ticket = $ticketResponse.data.ticket
@@ -2095,9 +2162,17 @@ function Connect-ProxmoxHost {
     }
     catch {
         $errMsg = $_.Exception.Message
+        $hint = ""
+        if ($errMsg -match '401|Unauthorized') {
+            $hint = "`n`nAuthentication failed. Check that:`n" +
+                    "  - Token ID format: user@realm!tokenname`n" +
+                    "  - Token secret is the full UUID value`n" +
+                    "  - Token has sufficient privileges (PVEAuditor or higher)`n" +
+                    "  - For username/password: use user@realm format (e.g. root@pam)"
+        }
         if (-not $SkipPrompts) {
             [System.Windows.MessageBox]::Show(
-                "Failed to connect to $($TargetHost):$Port`n`n$errMsg",
+                "Failed to connect to $($TargetHost):$Port`n`n$errMsg$hint",
                 "Connection Failed", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
         } else {
             Set-Status "Failed: $TargetHost -- $errMsg" "#f38ba8"
@@ -2252,9 +2327,17 @@ function Connect-ProxmoxPDM {
     }
     catch {
         $errMsg = $_.Exception.Message
+        $hint = ""
+        if ($errMsg -match '401|Unauthorized') {
+            $hint = "`n`nAuthentication failed. Check that:`n" +
+                    "  - Token ID format: user@realm!tokenname`n" +
+                    "  - Token secret is the full UUID value`n" +
+                    "  - Token has sufficient privileges`n" +
+                    "  - For username/password: use user@realm format (e.g. root@pam)"
+        }
         if (-not $SkipPrompts) {
             [System.Windows.MessageBox]::Show(
-                "Failed to connect to PDM $($TargetHost):$Port`n`n$errMsg",
+                "Failed to connect to PDM $($TargetHost):$Port`n`n$errMsg$hint",
                 "Connection Failed", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
         } else {
             Set-Status "Failed: PDM $TargetHost -- $errMsg" "#f38ba8"
@@ -2485,6 +2568,7 @@ $btnBulkConnect.Add_Click({
     $total = $selectedHosts.Count
     $success = 0
     $failed = 0
+    $failedHosts = @()
 
     for ($i = 0; $i -lt $total; $i++) {
         $host_ = $selectedHosts[$i]
@@ -2494,50 +2578,66 @@ $btnBulkConnect.Add_Click({
         $hostGroup = Get-GroupForHost -Address $host_
         $groupType = if ($hostGroup -and $hostGroup.type) { $hostGroup.type } else { "hyperv" }
 
-        if ($groupType -in @("proxmox", "proxmox-pdm")) {
-            # Proxmox connection
-            $pveAuth = Get-PveGroupAuth -Group $hostGroup
-            $port = if ($hostGroup.port) { [int]$hostGroup.port } else { if ($groupType -eq "proxmox-pdm") { 8443 } else { 8006 } }
+        $result = $false
+        try {
+            if ($groupType -in @("proxmox", "proxmox-pdm")) {
+                # Proxmox connection
+                $pveAuth = Get-PveGroupAuth -Group $hostGroup
+                $port = if ($hostGroup.port) { [int]$hostGroup.port } else { if ($groupType -eq "proxmox-pdm") { 8443 } else { 8006 } }
 
-            if ($groupType -eq "proxmox-pdm") {
-                $result = Connect-ProxmoxPDM -TargetHost $host_ -Port $port `
-                    -AuthType $pveAuth.AuthType -TokenId $pveAuth.TokenId -TokenSecret $pveAuth.TokenSecret `
-                    -Username $pveAuth.Username -Password $pveAuth.Password -SkipPrompts $true
-            } else {
-                $result = Connect-ProxmoxHost -TargetHost $host_ -Port $port `
-                    -AuthType $pveAuth.AuthType -TokenId $pveAuth.TokenId -TokenSecret $pveAuth.TokenSecret `
-                    -Username $pveAuth.Username -Password $pveAuth.Password -SkipPrompts $true
-            }
-        } else {
-            # Hyper-V connection
-            $savedCred = $null
-            $useCurrentUser = $true
-
-            if ($hostGroup) {
-                $useCurrentUser = [bool]$hostGroup.useCurrentUser
-                if (-not $useCurrentUser) {
-                    $savedCred = Get-GroupCredential -Group $hostGroup
+                if ($groupType -eq "proxmox-pdm") {
+                    $result = Connect-ProxmoxPDM -TargetHost $host_ -Port $port `
+                        -AuthType $pveAuth.AuthType -TokenId $pveAuth.TokenId -TokenSecret $pveAuth.TokenSecret `
+                        -Username $pveAuth.Username -Password $pveAuth.Password -SkipPrompts $true
+                } else {
+                    $result = Connect-ProxmoxHost -TargetHost $host_ -Port $port `
+                        -AuthType $pveAuth.AuthType -TokenId $pveAuth.TokenId -TokenSecret $pveAuth.TokenSecret `
+                        -Username $pveAuth.Username -Password $pveAuth.Password -SkipPrompts $true
                 }
             } else {
-                $histEntry = Get-HostHistoryEntry -Address $host_
-                $useCurrentUser = if ($histEntry) { [bool]$histEntry.useCurrentUser } else { $true }
-                if (-not $useCurrentUser) {
-                    $savedCred = Get-SavedCredential -Address $host_
-                }
-            }
+                # Hyper-V connection
+                $savedCred = $null
+                $useCurrentUser = $true
 
-            $result = Connect-HyperVHost -TargetHost $host_ -UseCurrentUser $useCurrentUser `
-                -ProvidedCredential $savedCred -RememberCredential ($null -ne $savedCred) `
-                -SkipPrompts $true
+                if ($hostGroup) {
+                    $useCurrentUser = [bool]$hostGroup.useCurrentUser
+                    if (-not $useCurrentUser) {
+                        $savedCred = Get-GroupCredential -Group $hostGroup
+                    }
+                } else {
+                    $histEntry = Get-HostHistoryEntry -Address $host_
+                    $useCurrentUser = if ($histEntry) { [bool]$histEntry.useCurrentUser } else { $true }
+                    if (-not $useCurrentUser) {
+                        $savedCred = Get-SavedCredential -Address $host_
+                    }
+                }
+
+                $result = Connect-HyperVHost -TargetHost $host_ -UseCurrentUser $useCurrentUser `
+                    -ProvidedCredential $savedCred -RememberCredential ($null -ne $savedCred) `
+                    -SkipPrompts $true
+            }
+        } catch {
+            $result = $false
         }
 
-        if ($result) { $success++ } else { $failed++ }
+        if ($result) { $success++ } else { $failed++; $failedHosts += $host_ }
     }
 
     $btnConnect.IsEnabled = $true
     $btnBulkConnect.IsEnabled = $true
-    Set-Status "Bulk connect complete: $success connected, $failed failed (of $total)." $(if ($failed -eq 0) { "#a6e3a1" } else { "#f9e2af" })
+
+    $statusColor = if ($failed -eq 0) { "#a6e3a1" } else { "#f9e2af" }
+    Set-Status "Bulk connect complete: $success connected, $failed failed (of $total)." $statusColor
     Update-StatusBar
+
+    if ($failed -gt 0) {
+        $failList = ($failedHosts | ForEach-Object { "  - $_" }) -join "`n"
+        [System.Windows.MessageBox]::Show(
+            "Bulk connect finished: $success of $total succeeded.`n`n$failed host(s) failed:`n$failList`n`nCheck the status bar for individual error details, or try connecting to failed hosts individually for more info.",
+            "Bulk Connect Results",
+            [System.Windows.MessageBoxButton]::OK,
+            [System.Windows.MessageBoxImage]::Warning)
+    }
 })
 
 # ---- Groups button ----
