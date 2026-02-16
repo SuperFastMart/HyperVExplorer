@@ -2016,18 +2016,23 @@ function Connect-ProxmoxHost {
     Enable-PveSslBypass
 
     try {
-        # Test TCP port
+        # Test TCP port (5s timeout)
         Set-Status "Testing port $Port on $TargetHost..." "#89b4fa"
         $Window.Dispatcher.Invoke([Action]{}, 'Background')
         $tcp = [System.Net.Sockets.TcpClient]::new()
         try {
-            $tcp.Connect($TargetHost, $Port)
+            $connectTask = $tcp.ConnectAsync($TargetHost, $Port)
+            if (-not $connectTask.Wait(5000)) { throw "Connection timed out after 5 seconds" }
             $tcp.Close()
         } catch {
+            try { $tcp.Dispose() } catch { }
+            $tcpErr = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message } else { $_.Exception.Message }
             if (-not $SkipPrompts) {
                 [System.Windows.MessageBox]::Show(
-                    "Cannot reach $($TargetHost):$Port`n`n$($_.Exception.Message)",
+                    "Cannot reach $TargetHost on port $Port`n`n$tcpErr`n`nCheck that:`n  - The Proxmox host is online`n  - Port $Port is open (try https://$($TargetHost):$Port in a browser)`n  - No firewall is blocking the connection",
                     "Connection Failed", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            } else {
+                Set-Status "Failed: $TargetHost -- port $Port unreachable" "#f38ba8"
             }
             return $false
         }
@@ -2264,16 +2269,21 @@ function Connect-ProxmoxPDM {
     Enable-PveSslBypass
 
     try {
-        # Test TCP port
+        # Test TCP port (5s timeout)
         $tcp = [System.Net.Sockets.TcpClient]::new()
         try {
-            $tcp.Connect($TargetHost, $Port)
+            $connectTask = $tcp.ConnectAsync($TargetHost, $Port)
+            if (-not $connectTask.Wait(5000)) { throw "Connection timed out after 5 seconds" }
             $tcp.Close()
         } catch {
+            try { $tcp.Dispose() } catch { }
+            $tcpErr = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message } else { $_.Exception.Message }
             if (-not $SkipPrompts) {
                 [System.Windows.MessageBox]::Show(
-                    "Cannot reach $($TargetHost):$Port`n`n$($_.Exception.Message)",
+                    "Cannot reach $TargetHost on port $Port`n`n$tcpErr`n`nCheck that:`n  - The PDM host is online`n  - Port $Port is open (try https://$($TargetHost):$Port in a browser)`n  - No firewall is blocking the connection",
                     "Connection Failed", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            } else {
+                Set-Status "Failed: PDM $TargetHost -- port $Port unreachable" "#f38ba8"
             }
             return $false
         }
@@ -2503,7 +2513,7 @@ function Show-PveCredentialDialog {
     [xml]$PcXAML = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Proxmox Credentials" Width="450" Height="320"
+        Title="Proxmox Credentials" Width="450" Height="360"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
         Background="#1e1e2e">
     <Grid Margin="24">
@@ -2529,18 +2539,24 @@ function Show-PveCredentialDialog {
                          Margin="0,0,0,4" IsChecked="True"/>
             <RadioButton x:Name="rdoPass" Content="Username / Password" GroupName="pAuth" Foreground="#cdd6f4" FontSize="13"/>
         </StackPanel>
-        <Grid Grid.Row="3" Margin="0,0,0,8">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="100"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <TextBlock x:Name="lblField1" Text="Token ID:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
-            <TextBox x:Name="txtField1" Grid.Column="1" FontSize="13"
-                     Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a" Padding="8,6" CaretBrush="#cdd6f4"/>
-        </Grid>
-        <Grid Grid.Row="4" Margin="0,0,0,8">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="100"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <TextBlock x:Name="lblField2" Text="Token Secret:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
-            <PasswordBox x:Name="txtField2" Grid.Column="1" FontSize="13"
+        <StackPanel Grid.Row="3" Margin="0,0,0,8">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="100"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <TextBlock x:Name="lblField1" Text="Token ID:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
+                <TextBox x:Name="txtField1" Grid.Column="1" FontSize="13"
                          Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a" Padding="8,6" CaretBrush="#cdd6f4"/>
-        </Grid>
+            </Grid>
+            <TextBlock x:Name="txtHint1" Text="Format: user@realm!tokenname  (e.g. root@pam!monitoring)" Foreground="#6c7086" FontSize="11" Margin="100,2,0,0"/>
+        </StackPanel>
+        <StackPanel Grid.Row="4" Margin="0,0,0,8">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="100"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <TextBlock x:Name="lblField2" Text="Token Secret:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
+                <PasswordBox x:Name="txtField2" Grid.Column="1" FontSize="13"
+                             Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a" Padding="8,6" CaretBrush="#cdd6f4"/>
+            </Grid>
+            <TextBlock x:Name="txtHint2" Text="The UUID secret from when the token was created" Foreground="#6c7086" FontSize="11" Margin="100,2,0,0"/>
+        </StackPanel>
         <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="btnOK" Content="Connect" Width="90" Padding="8,6" Margin="0,0,8,0"
                     Background="#364a63" Foreground="#89b4fa" FontSize="13" IsDefault="True"/>
@@ -2565,9 +2581,19 @@ function Show-PveCredentialDialog {
     $btnCancel = $PcWindow.FindName("btnCancel")
 
     $txtPort.Text = "$DefaultPort"
+    $txtHint1 = $PcWindow.FindName("txtHint1")
+    $txtHint2 = $PcWindow.FindName("txtHint2")
 
-    $rdoToken.Add_Checked({ $lblField1.Text = "Token ID:"; $lblField2.Text = "Token Secret:" })
-    $rdoPass.Add_Checked({ $lblField1.Text = "Username:"; $lblField2.Text = "Password:" })
+    $rdoToken.Add_Checked({
+        $lblField1.Text = "Token ID:"; $lblField2.Text = "Token Secret:"
+        $txtHint1.Text = "Format: user@realm!tokenname  (e.g. root@pam!monitoring)"
+        $txtHint2.Text = "The UUID secret from when the token was created"
+    })
+    $rdoPass.Add_Checked({
+        $lblField1.Text = "Username:"; $lblField2.Text = "Password:"
+        $txtHint1.Text = "Format: user@realm  (e.g. root@pam)"
+        $txtHint2.Text = ""
+    })
 
     $btnOK.Add_Click({ $PcWindow.DialogResult = $true })
     $btnCancel.Add_Click({ $PcWindow.DialogResult = $false })
