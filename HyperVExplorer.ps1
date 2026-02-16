@@ -1,6 +1,6 @@
 # =============================================================================================================
 # Script:    HyperVExplorer.ps1
-# Version:   1.4
+# Version:   1.5
 # Purpose:   WPF GUI tool for remote Hyper-V inventory collection across multiple hosts
 # Requires:  PowerShell 5.1+, WinRM enabled on target Hyper-V hosts
 # =============================================================================================================
@@ -203,7 +203,7 @@ function Get-GroupCredential {
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="&#xE7F4; HyperV Explorer" FontSize="20" FontWeight="SemiBold"
                            Foreground="{StaticResource AccentBlue}" VerticalAlignment="Center"/>
-                <TextBlock Grid.Column="2" Text="v1.4" FontSize="12"
+                <TextBlock Grid.Column="2" Text="v1.5" FontSize="12"
                            Foreground="{StaticResource FgSubtle}" VerticalAlignment="Center"/>
             </Grid>
         </Border>
@@ -229,6 +229,8 @@ function Get-GroupCredential {
                         Background="#3d3654" Foreground="{StaticResource AccentMauve}"
                         ToolTip="Manage host groups and credential mapping"/>
                 <Button x:Name="btnDisconnect" Content="&#x2716; Disconnect Selected Host" Margin="8,0,0,0"
+                        Background="#4a3644" Foreground="{StaticResource AccentRed}" IsEnabled="False"/>
+                <Button x:Name="btnDisconnectAll" Content="&#x2716; Disconnect All" Margin="8,0,0,0"
                         Background="#4a3644" Foreground="{StaticResource AccentRed}" IsEnabled="False"/>
                 <Rectangle Width="1" Fill="{StaticResource BgLight}" Margin="16,2" VerticalAlignment="Stretch"/>
                 <Button x:Name="btnExport" Content="&#x1F4BE; Export CSV" Margin="0,0,0,0"
@@ -315,8 +317,9 @@ $chkCurrentUser  = $Window.FindName("chkCurrentUser")
 $btnConnect      = $Window.FindName("btnConnect")
 $btnBulkConnect  = $Window.FindName("btnBulkConnect")
 $btnGroups       = $Window.FindName("btnGroups")
-$btnDisconnect   = $Window.FindName("btnDisconnect")
-$btnExport       = $Window.FindName("btnExport")
+$btnDisconnect    = $Window.FindName("btnDisconnect")
+$btnDisconnectAll = $Window.FindName("btnDisconnectAll")
+$btnExport        = $Window.FindName("btnExport")
 $btnClear        = $Window.FindName("btnClear")
 $btnHistory      = $Window.FindName("btnHistory")
 $dgVMs           = $Window.FindName("dgVMs")
@@ -358,9 +361,10 @@ function Update-StatusBar {
     $vmCount   = $script:VMData.Count
     $txtVMCount.Text = "$vmCount VMs | $hostCount Hosts"
     $hasData = $vmCount -gt 0
-    $btnExport.IsEnabled     = $hasData
-    $btnClear.IsEnabled      = $hasData
-    $btnDisconnect.IsEnabled = $hasData
+    $btnExport.IsEnabled        = $hasData
+    $btnClear.IsEnabled         = $hasData
+    $btnDisconnect.IsEnabled    = $hasData
+    $btnDisconnectAll.IsEnabled = $hasData
 }
 
 function Set-Status {
@@ -774,7 +778,7 @@ function Show-ManageGroupsDialog {
     # Group selection changed
     $lstGroups.Add_SelectionChanged({
         & $refreshHosts
-    }.GetNewClosure())
+    })
 
     # New Group
     $btnNewGrp.Add_Click({
@@ -802,7 +806,7 @@ function Show-ManageGroupsDialog {
             Save-Config $config
             & $refreshGroups
         }
-    }.GetNewClosure())
+    })
 
     # Edit Group
     $btnEditGrp.Add_Click({
@@ -832,7 +836,7 @@ function Show-ManageGroupsDialog {
             Save-Config $config
             & $refreshGroups
         }
-    }.GetNewClosure())
+    })
 
     # Delete Group
     $btnDelGrp.Add_Click({
@@ -854,24 +858,24 @@ function Show-ManageGroupsDialog {
             Save-Config $config
             & $refreshGroups
         }
-    }.GetNewClosure())
+    })
 
-    # Add Host to Group
+    # Add Hosts to Group (bulk - one per line)
     $btnAddHost.Add_Click({
         $sel = $lstGroups.SelectedItem
         if (-not $sel) {
-            [System.Windows.MessageBox]::Show("Select a group first.", "Add Host",
+            [System.Windows.MessageBox]::Show("Select a group first.", "Add Hosts",
                 [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
             return
         }
         $groupName = $sel.Tag
 
-        # Simple input dialog
         [xml]$AddXAML = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Add Host to $groupName" Width="400" Height="160"
-        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Title="Add Hosts to $groupName" Width="450" Height="350"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
+        MinWidth="350" MinHeight="250"
         Background="#1e1e2e">
     <Grid Margin="24">
         <Grid.RowDefinitions>
@@ -879,19 +883,16 @@ function Show-ManageGroupsDialog {
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <Grid Grid.Row="0" Margin="0,0,0,16">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="80"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Text="Host:" Foreground="#a6adc8" VerticalAlignment="Center" FontSize="13"/>
-            <TextBox x:Name="txtAddHost" Grid.Column="1" FontSize="13"
-                     Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
-                     Padding="8,6" CaretBrush="#cdd6f4"/>
-        </Grid>
+        <TextBlock Grid.Row="0" Text="Enter hostnames or IPs (one per line):"
+                   Foreground="#a6adc8" FontSize="13" Margin="0,0,0,8"/>
+        <TextBox x:Name="txtAddHosts" Grid.Row="1" FontSize="13"
+                 AcceptsReturn="True" TextWrapping="NoWrap"
+                 VerticalScrollBarVisibility="Auto"
+                 Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
+                 Padding="8,6" CaretBrush="#cdd6f4" Margin="0,0,0,12"/>
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button x:Name="btnAddOK" Content="Add" Width="80" Padding="8,6" Margin="0,0,8,0"
-                    Background="#364a63" Foreground="#89b4fa" FontSize="13" IsDefault="True"/>
+            <Button x:Name="btnAddOK" Content="Add All" Width="90" Padding="8,6" Margin="0,0,8,0"
+                    Background="#364a63" Foreground="#89b4fa" FontSize="13"/>
             <Button x:Name="btnAddCancel" Content="Cancel" Width="80" Padding="8,6"
                     Background="#45475a" Foreground="#cdd6f4" FontSize="13" IsCancel="True"/>
         </StackPanel>
@@ -902,13 +903,13 @@ function Show-ManageGroupsDialog {
         $AddWindow = [Windows.Markup.XamlReader]::Load($AddReader)
         $AddWindow.Owner = $MgrWindow
 
-        $txtAddHost  = $AddWindow.FindName("txtAddHost")
+        $txtAddHosts = $AddWindow.FindName("txtAddHosts")
         $btnAddOK    = $AddWindow.FindName("btnAddOK")
         $btnAddCancel = $AddWindow.FindName("btnAddCancel")
 
         $btnAddOK.Add_Click({
-            if ([string]::IsNullOrWhiteSpace($txtAddHost.Text)) {
-                [System.Windows.MessageBox]::Show("Please enter a hostname or IP.", "Add Host",
+            if ([string]::IsNullOrWhiteSpace($txtAddHosts.Text)) {
+                [System.Windows.MessageBox]::Show("Please enter at least one hostname or IP.", "Add Hosts",
                     [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
                 return
             }
@@ -919,33 +920,45 @@ function Show-ManageGroupsDialog {
             $AddWindow.DialogResult = $false
         }.GetNewClosure())
 
-        $txtAddHost.Focus() | Out-Null
+        $txtAddHosts.Focus() | Out-Null
         $addResult = $AddWindow.ShowDialog()
 
         if ($addResult -eq $true) {
-            $hostAddr = $txtAddHost.Text.Trim()
+            $lines = $txtAddHosts.Text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+            if ($lines.Count -eq 0) { return }
+
             $config = Load-Config
             $group = $config.groups | Where-Object { $_.name -eq $groupName } | Select-Object -First 1
             if ($group) {
                 $currentHosts = @($group.hosts)
-                if ($hostAddr -in $currentHosts) {
-                    [System.Windows.MessageBox]::Show("'$hostAddr' is already in this group.", "Add Host",
-                        [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
-                    return
-                }
-                # Remove from any other group first
-                foreach ($otherGroup in @($config.groups)) {
-                    if ($otherGroup.name -ne $groupName) {
-                        $otherGroup.hosts = @($otherGroup.hosts | Where-Object { $_ -ne $hostAddr })
+                $added = 0
+                $skipped = 0
+                foreach ($hostAddr in $lines) {
+                    if ($hostAddr -in $currentHosts) {
+                        $skipped++
+                        continue
                     }
+                    # Remove from any other group first
+                    foreach ($otherGroup in @($config.groups)) {
+                        if ($otherGroup.name -ne $groupName) {
+                            $otherGroup.hosts = @($otherGroup.hosts | Where-Object { $_ -ne $hostAddr })
+                        }
+                    }
+                    $currentHosts += $hostAddr
+                    $added++
                 }
-                $group.hosts = $currentHosts + @($hostAddr)
+                $group.hosts = $currentHosts
                 Save-Config $config
                 & $refreshHosts
                 & $refreshGroups
+
+                $msg = "$added host(s) added to '$groupName'."
+                if ($skipped -gt 0) { $msg += " $skipped already in group (skipped)." }
+                [System.Windows.MessageBox]::Show($msg, "Add Hosts",
+                    [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
             }
         }
-    }.GetNewClosure())
+    })
 
     # Remove Host from Group
     $btnRemoveHost.Add_Click({
@@ -966,11 +979,11 @@ function Show-ManageGroupsDialog {
             & $refreshHosts
             & $refreshGroups
         }
-    }.GetNewClosure())
+    })
 
     $btnMgrClose.Add_Click({
         $MgrWindow.Close()
-    }.GetNewClosure())
+    })
 
     $MgrWindow.ShowDialog() | Out-Null
 }
@@ -1152,6 +1165,10 @@ function Show-HistoryMenu {
     $config = Load-Config
     $hostList = @($config.hosts)
 
+    # Capture script-level controls as local vars so .GetNewClosure() can see them
+    $localTxtHost = $txtHost
+    $localChkCurrentUser = $chkCurrentUser
+
     $menu = [System.Windows.Controls.ContextMenu]::new()
     $menu.Background = New-DarkBrush "#313244"
     $menu.BorderBrush = New-DarkBrush "#45475a"
@@ -1186,14 +1203,19 @@ function Show-HistoryMenu {
             $hostUseCurrentUser = [bool]$h.useCurrentUser
             if ($group) { $hostUseCurrentUser = [bool]$group.useCurrentUser }
             $item.Add_Click({
-                $txtHost.Text = $hostAddress
-                $chkCurrentUser.IsChecked = $hostUseCurrentUser
+                $localTxtHost.Text = $hostAddress
+                $localChkCurrentUser.IsChecked = $hostUseCurrentUser
             }.GetNewClosure())
 
             $menu.Items.Add($item) | Out-Null
         }
 
         $menu.Items.Add([System.Windows.Controls.Separator]::new()) | Out-Null
+
+        # Capture script-level functions as local refs for the non-modal closure
+        $fnLoadConfig = ${function:Load-Config}
+        $fnSaveConfig = ${function:Save-Config}
+        $fnSetStatus  = ${function:Set-Status}
 
         $clearItem = [System.Windows.Controls.MenuItem]::new()
         $clearItem.Header = "Clear History"
@@ -1206,10 +1228,10 @@ function Show-HistoryMenu {
                 [System.Windows.MessageBoxButton]::YesNo,
                 [System.Windows.MessageBoxImage]::Question)
             if ($confirm -eq 'Yes') {
-                $config = Load-Config
-                $config.hosts = @()
-                Save-Config $config
-                Set-Status "History cleared." "#f9e2af"
+                $cfg = & $fnLoadConfig
+                $cfg.hosts = @()
+                & $fnSaveConfig $cfg
+                & $fnSetStatus "History cleared." "#f9e2af"
             }
         }.GetNewClosure())
         $menu.Items.Add($clearItem) | Out-Null
@@ -1620,6 +1642,29 @@ $btnDisconnect.Add_Click({
         }
         $script:ConnectedHosts.Remove($HostToRemove)
         Set-Status "Disconnected from $HostToRemove." "#f9e2af"
+        Update-StatusBar
+    }
+})
+
+# ---- Disconnect All button ----
+$btnDisconnectAll.Add_Click({
+    $hostCount = $script:ConnectedHosts.Count
+    if ($hostCount -eq 0) {
+        [System.Windows.MessageBox]::Show("No hosts are currently connected.",
+            "HyperV Explorer", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+        return
+    }
+
+    $Confirm = [System.Windows.MessageBox]::Show(
+        "Disconnect all $hostCount host(s) and remove all VMs from the grid?",
+        "Confirm Disconnect All",
+        [System.Windows.MessageBoxButton]::YesNo,
+        [System.Windows.MessageBoxImage]::Question)
+
+    if ($Confirm -eq 'Yes') {
+        $script:VMData.Clear()
+        $script:ConnectedHosts.Clear()
+        Set-Status "All hosts disconnected." "#f9e2af"
         Update-StatusBar
     }
 })
