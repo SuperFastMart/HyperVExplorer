@@ -1885,7 +1885,8 @@ function Invoke-PveApi {
         [string]$Method = "GET",
         [hashtable]$Body
     )
-    $params = @{ Uri = $Uri; Method = $Method; Headers = $Headers }
+    $params = @{ Uri = $Uri; Method = $Method }
+    if ($Headers -and $Headers.Count -gt 0) { $params.Headers = $Headers }
     if ($Body) { $params.Body = $Body }
     if (-not $script:IsPowerShell5) { $params.SkipCertificateCheck = $true }
     Invoke-RestMethod @params
@@ -2032,11 +2033,58 @@ function Connect-ProxmoxHost {
         }
 
         # Authenticate
-        Set-Status "Authenticating to $TargetHost..." "#89b4fa"
+        Set-Status "Authenticating to $TargetHost ($AuthType)..." "#89b4fa"
         $Window.Dispatcher.Invoke([Action]{}, 'Background')
-        $auth = Get-PveAuthHeaders -BaseUrl $BaseUrl -AuthType $AuthType `
-            -TokenId $TokenId -TokenSecret $TokenSecret -Username $Username -Password $Password
+        try {
+            $auth = Get-PveAuthHeaders -BaseUrl $BaseUrl -AuthType $AuthType `
+                -TokenId $TokenId -TokenSecret $TokenSecret -Username $Username -Password $Password
+        } catch {
+            $authErr = $_.Exception.Message
+            $detail = ""
+            try { $detail = $_.ErrorDetails.Message } catch { }
+            $msg = "Authentication failed for $($TargetHost):$Port`n`n$authErr"
+            if ($detail) { $msg += "`n`nServer response: $detail" }
+            if ($AuthType -eq "password") {
+                $msg += "`n`nFor username/password auth:`n  - Username format: user@realm (e.g. root@pam)`n  - Check password is correct"
+            }
+            if (-not $SkipPrompts) {
+                [System.Windows.MessageBox]::Show($msg, "PVE Auth Failed",
+                    [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            } else {
+                Set-Status "Failed: $TargetHost -- auth error: $authErr" "#f38ba8"
+            }
+            return $false
+        }
         $headers = $auth.Headers
+
+        # Verify auth works with a lightweight API call
+        Set-Status "Verifying auth on $TargetHost..." "#89b4fa"
+        $Window.Dispatcher.Invoke([Action]{}, 'Background')
+        try {
+            $null = Invoke-PveApi -Uri "$BaseUrl/api2/json/version" -Headers $headers -Method GET
+        } catch {
+            $verifyErr = $_.Exception.Message
+            $detail = ""
+            try { $detail = $_.ErrorDetails.Message } catch { }
+            $msg = "Connected to $($TargetHost):$Port but authentication was rejected.`n`n$verifyErr"
+            if ($detail) { $msg += "`n`nServer response: $detail" }
+            if ($AuthType -eq "token") {
+                $msg += "`n`nFor API token auth, verify:`n" +
+                        "  - Token ID: $TokenId`n" +
+                        "  - Format must be: user@realm!tokenname`n" +
+                        "  - Secret is the full UUID from token creation`n" +
+                        "  - Token has not been revoked in PVE`n" +
+                        "  - Token has Audit or higher privilege on /`n" +
+                        "`nTest with curl:`n  curl -k -H 'Authorization: PVEAPIToken=$TokenId=SECRET' https://$($TargetHost):$Port/api2/json/version"
+            }
+            if (-not $SkipPrompts) {
+                [System.Windows.MessageBox]::Show($msg, "PVE Auth Rejected",
+                    [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            } else {
+                Set-Status "Failed: $TargetHost -- auth rejected: $verifyErr" "#f38ba8"
+            }
+            return $false
+        }
 
         # Helper for API calls
         $apiGet = {
@@ -2231,11 +2279,56 @@ function Connect-ProxmoxPDM {
         }
 
         # Authenticate
-        Set-Status "Authenticating to PDM $TargetHost..." "#f9e2af"
+        Set-Status "Authenticating to PDM $TargetHost ($AuthType)..." "#f9e2af"
         $Window.Dispatcher.Invoke([Action]{}, 'Background')
-        $auth = Get-PveAuthHeaders -BaseUrl $BaseUrl -AuthType $AuthType `
-            -TokenId $TokenId -TokenSecret $TokenSecret -Username $Username -Password $Password
+        try {
+            $auth = Get-PveAuthHeaders -BaseUrl $BaseUrl -AuthType $AuthType `
+                -TokenId $TokenId -TokenSecret $TokenSecret -Username $Username -Password $Password
+        } catch {
+            $authErr = $_.Exception.Message
+            $detail = ""
+            try { $detail = $_.ErrorDetails.Message } catch { }
+            $msg = "PDM authentication failed for $($TargetHost):$Port`n`n$authErr"
+            if ($detail) { $msg += "`n`nServer response: $detail" }
+            if ($AuthType -eq "password") {
+                $msg += "`n`nFor username/password auth:`n  - Username format: user@realm (e.g. root@pam)`n  - Check password is correct"
+            }
+            if (-not $SkipPrompts) {
+                [System.Windows.MessageBox]::Show($msg, "PDM Auth Failed",
+                    [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            } else {
+                Set-Status "Failed: PDM $TargetHost -- auth error: $authErr" "#f38ba8"
+            }
+            return $false
+        }
         $headers = $auth.Headers
+
+        # Verify auth with lightweight call
+        Set-Status "Verifying auth on PDM $TargetHost..." "#f9e2af"
+        $Window.Dispatcher.Invoke([Action]{}, 'Background')
+        try {
+            $null = Invoke-PveApi -Uri "$BaseUrl/api2/json/version" -Headers $headers -Method GET
+        } catch {
+            $verifyErr = $_.Exception.Message
+            $detail = ""
+            try { $detail = $_.ErrorDetails.Message } catch { }
+            $msg = "Connected to PDM $($TargetHost):$Port but authentication was rejected.`n`n$verifyErr"
+            if ($detail) { $msg += "`n`nServer response: $detail" }
+            if ($AuthType -eq "token") {
+                $msg += "`n`nFor API token auth, verify:`n" +
+                        "  - Token ID: $TokenId`n" +
+                        "  - Format must be: user@realm!tokenname`n" +
+                        "  - Secret is the full UUID from token creation`n" +
+                        "  - Token has not been revoked"
+            }
+            if (-not $SkipPrompts) {
+                [System.Windows.MessageBox]::Show($msg, "PDM Auth Rejected",
+                    [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+            } else {
+                Set-Status "Failed: PDM $TargetHost -- auth rejected: $verifyErr" "#f38ba8"
+            }
+            return $false
+        }
 
         $apiGet = {
             param([string]$Path)
@@ -2473,11 +2566,11 @@ function Show-PveCredentialDialog {
 
     $txtPort.Text = "$DefaultPort"
 
-    $rdoToken.Add_Checked({ $lblField1.Text = "Token ID:"; $lblField2.Text = "Token Secret:" }.GetNewClosure())
-    $rdoPass.Add_Checked({ $lblField1.Text = "Username:"; $lblField2.Text = "Password:" }.GetNewClosure())
+    $rdoToken.Add_Checked({ $lblField1.Text = "Token ID:"; $lblField2.Text = "Token Secret:" })
+    $rdoPass.Add_Checked({ $lblField1.Text = "Username:"; $lblField2.Text = "Password:" })
 
-    $btnOK.Add_Click({ $PcWindow.DialogResult = $true }.GetNewClosure())
-    $btnCancel.Add_Click({ $PcWindow.DialogResult = $false }.GetNewClosure())
+    $btnOK.Add_Click({ $PcWindow.DialogResult = $true })
+    $btnCancel.Add_Click({ $PcWindow.DialogResult = $false })
 
     $txtField1.Focus() | Out-Null
     if ($PcWindow.ShowDialog() -eq $true) {
