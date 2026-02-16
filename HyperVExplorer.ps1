@@ -2101,6 +2101,30 @@ function Connect-ProxmoxHost {
         Set-Status "Discovering nodes on $TargetHost..." "#89b4fa"
         $Window.Dispatcher.Invoke([Action]{}, 'Background')
         $nodes = & $apiGet "/api2/json/nodes"
+
+        # Check if this cluster is already connected via another node
+        $discoveredNames = @($nodes | ForEach-Object { $_.node })
+        foreach ($connKey in @($script:ConnectedHosts.Keys)) {
+            $connInfo = $script:ConnectedHosts[$connKey]
+            if ($connInfo.NodeNames) {
+                $existingNodes = @($connInfo.NodeNames -split ',\s*')
+                foreach ($dn in $discoveredNames) {
+                    if ($dn -in $existingNodes) {
+                        if (-not $SkipPrompts) {
+                            [System.Windows.MessageBox]::Show(
+                                "This cluster is already connected via '$connKey'.`nNode '$dn' is part of the same cluster.`n`nNodes in cluster: $($connInfo.NodeNames)",
+                                "Cluster Already Connected",
+                                [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+                        } else {
+                            Set-Status "Skipped $TargetHost -- cluster already connected via $connKey" "#f9e2af"
+                        }
+                        $Window.Dispatcher.Invoke([Action]{}, 'Background')
+                        return $true
+                    }
+                }
+            }
+        }
+
         $totalVMs = 0
 
         foreach ($node in $nodes) {
