@@ -28,8 +28,11 @@ Inventory for a mixed hypervisor estate. Connect to **Microsoft Hyper-V** (inclu
 
 ## Getting started
 
-1. Download `HypervisorExplorer-<version>-win-x64.zip` from [Releases](../../releases) and unzip it. Nothing needs installing: it's a self-contained .NET 10 build.
-2. Run `HypervisorExplorer.exe` and click **+ Connect**, or use **View → Load demo data** to look around first.
+1. Download the latest release (**v3.0.0**) and unzip it. Nothing needs installing: it's a self-contained .NET 10 build.
+   - Windows: [HypervisorExplorer-3.0.0-win-x64.zip](https://github.com/SuperFastMart/HyperVExplorer/releases/download/v3.0.0/HypervisorExplorer-3.0.0-win-x64.zip)
+   - macOS (Apple Silicon): [HypervisorExplorer-3.0.0-osx-arm64.zip](https://github.com/SuperFastMart/HyperVExplorer/releases/download/v3.0.0/HypervisorExplorer-3.0.0-osx-arm64.zip). On first launch, right-click the app → **Open**.
+   - All versions: [Releases](../../releases)
+2. Run `HypervisorExplorer.exe` (or **Hypervisor Explorer.app**) and click **+ Connect**, or use **View → Load demo data** to look around first.
 3. Use **Export → RVTools-compatible workbook** to produce the `.xlsx`.
 
 The app also runs natively on macOS (Apple Silicon build in the releases) and Linux, with the same features: VMware, Proxmox and Hyper-V can all be collected from a Mac. On macOS, sign in to Hyper-V with `DOMAIN\user` and a password; integrated Windows sign-in is only available on Windows.
@@ -99,6 +102,10 @@ Every grid, CSV, XLSX sheet and HTML table comes from the same `TableDefinition`
 - Hyper-V credentials reach the PowerShell child process through stdin, never on the command line or in environment variables. On macOS/Linux the built-in WinRM client authenticates with NTLM and encrypts every message (HTTP) or uses TLS (HTTPS); the collection script runs on the host without the password being passed to it.
 - TLS certificate checks are skipped by default for Proxmox and ESXi, because self-signed certificates are the norm (RVTools does the same). Untick **Accept self-signed certificates**, or pass `--strict-tls`, to enforce validation.
 - Exports contain infrastructure details (hostnames, IPs, serial numbers). The `.gitignore` excludes `*.xlsx`, `*.csv` and `RVTools_*` so they don't get committed by accident.
+
+## Documentation
+
+The user guide (installation, connecting, exports, troubleshooting) is on Confluence: [Hypervisor Explorer (CI space)](https://loopup.atlassian.net/wiki/spaces/CI/pages/798818309).
 
 ## Status
 
