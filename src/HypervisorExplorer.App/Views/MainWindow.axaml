@@ -1,0 +1,286 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:HypervisorExplorer.App.ViewModels"
+        xmlns:svc="using:HypervisorExplorer.App.Services"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="1400" d:DesignHeight="850"
+        x:Class="HypervisorExplorer.App.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Icon="/Assets/app.ico"
+        Title="{Binding WindowTitle}"
+        Width="1480" Height="900" MinWidth="960" MinHeight="560"
+        WindowStartupLocation="CenterScreen">
+
+    <DockPanel>
+        <!-- ===== Toolbar ===== -->
+        <Border DockPanel.Dock="Top" Background="{DynamicResource ToolbarBackground}"
+                BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,0,0,1" Padding="12,8">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <TextBlock Text="Hypervisor Explorer" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"
+                               Foreground="{DynamicResource AccentText}" Margin="2,0,14,0"/>
+                    <Button Classes="primary" Content="+ Connect" Command="{Binding ConnectCommand}"
+                            ToolTip.Tip="Connect to a Hyper-V host, Proxmox VE node, ESXi host or vCenter"/>
+                    <Button Classes="tool" Content="Saved hosts" Command="{Binding ManageHostsCommand}"
+                            ToolTip.Tip="Saved hosts and groups: store credentials once, connect many"/>
+                    <Button Classes="tool" Content="⟳ Refresh" Command="{Binding RefreshAllCommand}"
+                            IsEnabled="{Binding HasConnections}" ToolTip.Tip="Re-collect every connected source"/>
+                    <Rectangle Width="1" Fill="{DynamicResource PanelBorder}" Margin="6,4"/>
+                    <Button Classes="tool" Content="Open…" Command="{Binding OpenInventoryCommand}"
+                            ToolTip.Tip="Open a saved inventory snapshot (.json)"/>
+                    <Button Classes="tool" Content="Save…" Command="{Binding SaveInventoryCommand}"
+                            ToolTip.Tip="Save the whole inventory to a snapshot file you can reopen later"/>
+                    <DropDownButton Classes="tool" Content="Export">
+                        <DropDownButton.Flyout>
+                            <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                                <MenuItem Header="RVTools-compatible workbook (.xlsx)…" Command="{Binding ExportXlsxCommand}"/>
+                                <MenuItem Header="Current table to CSV (filtered)…" Command="{Binding ExportCsvCommand}"/>
+                                <MenuItem Header="All tables to CSV (.zip)…" Command="{Binding ExportCsvZipCommand}"/>
+                                <MenuItem Header="HTML estate report…" Command="{Binding ExportHtmlCommand}"/>
+                            </MenuFlyout>
+                        </DropDownButton.Flyout>
+                    </DropDownButton>
+                    <DropDownButton Classes="tool" Content="View">
+                        <DropDownButton.Flyout>
+                            <Flyout Placement="BottomEdgeAlignedLeft">
+                                <StackPanel Spacing="6" Margin="4">
+                                    <CheckBox Content="Show details panel" IsChecked="{Binding ShowDetails}"/>
+                                    <CheckBox Content="Show activity log" IsChecked="{Binding ShowActivity}"/>
+                                    <CheckBox Content="Show empty tables" IsChecked="{Binding ShowEmptyTables}"/>
+                                    <CheckBox Content="Hide columns with no data" IsChecked="{Binding HideEmptyColumns}"/>
+                                    <Separator/>
+                                    <Button Classes="link" Content="Load demo data" Command="{Binding LoadDemoCommand}"/>
+                                    <Button Classes="link" Content="Clear inventory" Command="{Binding ClearAllCommand}"/>
+                                </StackPanel>
+                            </Flyout>
+                        </DropDownButton.Flyout>
+                    </DropDownButton>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <ProgressBar IsIndeterminate="True" Width="80" IsVisible="{Binding IsBusy}" VerticalAlignment="Center"/>
+                    <TextBox x:Name="SearchBox" Width="300" PlaceholderText="Search all columns (Ctrl+F)…" Text="{Binding SearchText}"
+                             VerticalAlignment="Center" CornerRadius="6"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ===== Status bar ===== -->
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource ToolbarBackground}"
+                BorderBrush="{DynamicResource PanelBorder}" BorderThickness="0,1,0,0" Padding="12,5">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Classes="subtle" Text="{Binding StatusText}" TextTrimming="CharacterEllipsis"/>
+                <TextBlock Grid.Column="1" Classes="subtle" Text="{Binding SummaryText}" Margin="16,0,0,0"/>
+            </Grid>
+        </Border>
+
+        <!-- ===== Body ===== -->
+        <Grid x:Name="BodyGrid" ColumnDefinitions="290,4,*,4,340" Margin="8">
+
+            <!-- Left: tree + connections -->
+            <Grid RowDefinitions="*,4,Auto">
+                <Border Classes="panel" Padding="8">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Classes="section" Text="INVENTORY"/>
+                        <Panel>
+                            <TreeView ItemsSource="{Binding TreeRoots}" SelectedItem="{Binding SelectedNode}">
+                                <TreeView.ItemContainerTheme>
+                                    <ControlTheme TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}" x:DataType="vm:TreeNodeViewModel">
+                                        <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+                                    </ControlTheme>
+                                </TreeView.ItemContainerTheme>
+                                <TreeView.ItemTemplate>
+                                    <TreeDataTemplate ItemsSource="{Binding Children}" DataType="vm:TreeNodeViewModel">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="{Binding Glyph}" Foreground="{DynamicResource AccentText}" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding Title}" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding Subtitle}" Classes="subtle" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </TreeDataTemplate>
+                                </TreeView.ItemTemplate>
+                            </TreeView>
+                            <TextBlock Classes="subtle" Text="Nothing collected yet." IsVisible="{Binding !HasData}" Margin="4"/>
+                        </Panel>
+                    </DockPanel>
+                </Border>
+
+                <Border Grid.Row="2" Classes="panel" Padding="8" MaxHeight="320" IsVisible="{Binding HasConnections}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Classes="section" Text="SOURCES"/>
+                        <ScrollViewer>
+                            <ItemsControl ItemsSource="{Binding Connections.Connections}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="svc:ConnectionItem">
+                                        <Border Padding="6,5" Margin="0,0,0,4" CornerRadius="6" Background="#20263A">
+                                            <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto">
+                                                <Ellipse Width="8" Height="8" Margin="0,0,8,0" VerticalAlignment="Center"
+                                                         Classes.ok="{Binding Status, Converter={x:Static svc:StatusConverters.IsOk}}"
+                                                         Classes.err="{Binding Status, Converter={x:Static svc:StatusConverters.IsFailed}}"
+                                                         Classes.busy="{Binding IsBusy}">
+                                                    <Ellipse.Styles>
+                                                        <Style Selector="Ellipse"><Setter Property="Fill" Value="{DynamicResource SubtleText}"/></Style>
+                                                        <Style Selector="Ellipse.ok"><Setter Property="Fill" Value="{DynamicResource OkBrush}"/></Style>
+                                                        <Style Selector="Ellipse.err"><Setter Property="Fill" Value="{DynamicResource ErrorBrush}"/></Style>
+                                                        <Style Selector="Ellipse.busy"><Setter Property="Fill" Value="{DynamicResource WarnBrush}"/></Style>
+                                                    </Ellipse.Styles>
+                                                </Ellipse>
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="{Binding Address}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Classes="subtle" Text="{Binding PlatformLabel}"/>
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top">
+                                                    <Button Classes="link" Content="⟳" ToolTip.Tip="Refresh"
+                                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RefreshCommand}"
+                                                            CommandParameter="{Binding}" IsVisible="{Binding !IsBusy}"/>
+                                                    <Button Classes="link" Content="■" ToolTip.Tip="Cancel"
+                                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).CancelCommand}"
+                                                            CommandParameter="{Binding}" IsVisible="{Binding IsBusy}"/>
+                                                    <Button Classes="link" Content="✕" ToolTip.Tip="Disconnect and remove from inventory"
+                                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).DisconnectCommand}"
+                                                            CommandParameter="{Binding}"/>
+                                                </StackPanel>
+                                                <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,2,0,0">
+                                                    <TextBlock Classes="subtle" Text="{Binding Message}" TextWrapping="Wrap"/>
+                                                    <TextBlock Classes="subtle" Text="{Binding Hint}" TextWrapping="Wrap" Foreground="{DynamicResource WarnBrush}"
+                                                               IsVisible="{Binding Hint, Converter={x:Static ObjectConverters.IsNotNull}}" Margin="0,4,0,0"/>
+                                                    <Button Classes="link" Content="Copy error" FontSize="11"
+                                                            IsVisible="{Binding Status, Converter={x:Static svc:StatusConverters.IsFailed}}"
+                                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).CopyHintCommand}"
+                                                            CommandParameter="{Binding}"/>
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
+            </Grid>
+
+            <GridSplitter Grid.Column="1" Background="Transparent" ResizeDirection="Columns"/>
+
+            <!-- Center: tables -->
+            <Grid Grid.Column="2" RowDefinitions="Auto,Auto,*,Auto">
+                <ListBox Classes="tabs" ItemsSource="{Binding VisibleTables}" SelectedItem="{Binding SelectedTable}"
+                         IsVisible="{Binding HasData}">
+                    <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="vm:TableViewModel">
+                            <TextBlock Text="{Binding Header}" ToolTip.Tip="{Binding Description}"/>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+
+                <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="2,2,0,6" IsVisible="{Binding HasData}">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Classes="h1" Text="{Binding SelectedTable.Name}"/>
+                        <TextBlock Classes="subtle" VerticalAlignment="Center" Text="{Binding SelectedTable.Description}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                        <TextBlock Classes="subtle" VerticalAlignment="Center">
+                            <Run Text="{Binding SelectedTable.VisibleCount}"/>
+                            <Run Text="of"/>
+                            <Run Text="{Binding SelectedTable.TotalCount}"/>
+                            <Run Text="rows"/>
+                        </TextBlock>
+                        <Button x:Name="ColumnsButton" Classes="tool" Content="Columns ▾" Click="OnColumnsButtonClick"/>
+                    </StackPanel>
+                </Grid>
+
+                <Border Grid.Row="2" Classes="panel" ClipToBounds="True">
+                    <Panel>
+                        <DataGrid x:Name="Grid" IsReadOnly="True" CanUserSortColumns="True" CanUserReorderColumns="True"
+                                  CanUserResizeColumns="True" SelectionMode="Extended" ClipboardCopyMode="IncludeHeader"
+                                  HeadersVisibility="Column" FrozenColumnCount="1" IsVisible="{Binding HasData}"
+                                  ItemsSource="{Binding SelectedTable.View}" SelectionChanged="OnGridSelectionChanged">
+                            <DataGrid.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Copy selected rows" Click="OnCopyRows"/>
+                                    <MenuItem Header="Copy cell value" Click="OnCopyCell"/>
+                                    <Separator/>
+                                    <MenuItem Header="Export current table to CSV…" Command="{Binding ExportCsvCommand}"/>
+                                </ContextMenu>
+                            </DataGrid.ContextMenu>
+                        </DataGrid>
+
+                        <!-- Welcome / empty state -->
+                        <StackPanel IsVisible="{Binding !HasData}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                    MaxWidth="560" Spacing="14">
+                            <TextBlock Text="Inventory for your whole hypervisor estate" FontSize="22" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap"/>
+                            <TextBlock Classes="subtle" FontSize="13" TextAlignment="Center" TextWrapping="Wrap"
+                                       Text="Connect to Microsoft Hyper-V (including Failover Clusters), Proxmox VE clusters, and VMware ESXi or vCenter. Browse everything in RVTools-style tables and export an RVTools-compatible workbook."/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8" Margin="0,6,0,0">
+                                <Button Classes="primary" Content="+ Connect" Command="{Binding ConnectCommand}"/>
+                                <Button Content="Saved hosts" Command="{Binding ManageHostsCommand}"/>
+                                <Button Content="Open snapshot…" Command="{Binding OpenInventoryCommand}"/>
+                                <Button Content="Load demo data" Command="{Binding LoadDemoCommand}"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Panel>
+                </Border>
+
+                <!-- Activity log -->
+                <Border Grid.Row="3" Classes="panel" Margin="0,6,0,0" Height="170" IsVisible="{Binding ShowActivity}" Padding="8">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Classes="section" Text="ACTIVITY"/>
+                        <ListBox ItemsSource="{Binding Connections.Activity}" Background="Transparent">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="svc:ActivityEntry">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Classes="subtle" Text="{Binding TimeText}" FontFamily="monospace"/>
+                                        <TextBlock Text="{Binding Source}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding Message}" TextWrapping="NoWrap"
+                                                   Classes.err="{Binding IsError}">
+                                            <TextBlock.Styles>
+                                                <Style Selector="TextBlock.err"><Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/></Style>
+                                            </TextBlock.Styles>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </Border>
+            </Grid>
+
+            <GridSplitter Grid.Column="3" Background="Transparent" ResizeDirection="Columns" IsVisible="{Binding ShowDetails}"/>
+
+            <!-- Right: details -->
+            <Border Grid.Column="4" Classes="panel" Padding="12" IsVisible="{Binding ShowDetails}">
+                <Panel>
+                    <TextBlock Classes="subtle" Text="Select a VM row to see its details." TextWrapping="Wrap"
+                               IsVisible="{Binding Details, Converter={x:Static ObjectConverters.IsNull}}"/>
+                    <ScrollViewer IsVisible="{Binding Details, Converter={x:Static ObjectConverters.IsNotNull}}">
+                        <StackPanel Spacing="4">
+                            <TextBlock Classes="h1" Text="{Binding Details.Title}" TextWrapping="Wrap"/>
+                            <TextBlock Classes="subtle" Text="{Binding Details.Subtitle}" Margin="0,0,0,8"/>
+                            <ItemsControl ItemsSource="{Binding Details.Sections}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="vm:DetailSection">
+                                        <StackPanel Margin="0,8,0,4">
+                                            <TextBlock Classes="section" Text="{Binding Title}"/>
+                                            <ItemsControl ItemsSource="{Binding Fields}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate DataType="vm:DetailField">
+                                                        <Grid ColumnDefinitions="110,*" Margin="0,2">
+                                                            <TextBlock Classes="subtle" Text="{Binding Label}" TextWrapping="Wrap"/>
+                                                            <SelectableTextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap"/>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Panel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>

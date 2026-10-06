@@ -20,6 +20,7 @@ public sealed record DatastoreRow(Datastore Ds, Inventory Inv);
 public sealed record ClusterRow(ClusterInfo Cluster);
 public sealed record SourceRow(Source Source);
 public sealed record HealthRow(HealthItem Item);
+public sealed record RawSheetRow(Source Source, Dictionary<string, object?> Values);
 public sealed record MetaRow(string Server, DateTime Created);
 
 /// <summary>Table definitions for every RVTools worksheet.</summary>
@@ -93,6 +94,34 @@ public static class RvToolsTables
         if (headers.Contains("VI SDK Server")) b.Text("VI SDK Server", r => host(r).SourceAddress);
         if (headers.Contains("VI SDK UUID")) b.Text("VI SDK UUID", r => host(r).SourceAddress);
         return b;
+    }
+
+    /// <summary>
+    /// Key under <see cref="InventoryObject.Extra"/> of a <see cref="Source"/> holding pre-built rows for a whole
+    /// sheet (<c>List&lt;Dictionary&lt;string, object?&gt;&gt;</c> keyed by RVTools header). Used by collectors for
+    /// sheets with no model equivalent, e.g. vSphere resource pools or distributed switches.
+    /// </summary>
+    public static string RawSheetKey(string sheet) => "__sheet:" + sheet;
+
+    private static TableDefinition RawSheet(string sheet, string description)
+    {
+        var key = RawSheetKey(sheet);
+        var columns = RvToolsSchema.HeadersFor(sheet)
+            .Select(h => new TableColumn(h, CellKind.Text, row =>
+                ((RawSheetRow)row).Values.TryGetValue(h, out var v) ? v : null))
+            .ToList();
+        return new TableDefinition
+        {
+            Name = sheet,
+            Description = description,
+            Columns = columns,
+            Rows = inv => inv.Sources
+                .SelectMany(src => src.Extra.TryGetValue(key, out var raw) && raw is IEnumerable<Dictionary<string, object?>> rows
+                    ? rows.Select(r => (object)new RawSheetRow(src, r))
+                    : [])
+                .ToList(),
+            ScopeOf = row => (((RawSheetRow)row).Source.Address, null, null),
+        };
     }
 
     private static IEnumerable<VmRow> Vms(Inventory inv) => inv.VirtualMachines.Select(v => new VmRow(v, inv));
@@ -290,8 +319,7 @@ public static class RvToolsTables
                 scopeOf: r => (r.Source.Address, null, null));
 
     private static TableDefinition VRp() =>
-        new RvSheetBuilder<VmRow>("vRP")
-            .Build(_ => [], "Resource pools (VMware only; populated by the vSphere collector).");
+        RawSheet("vRP", "Resource pools (vCenter / ESXi).");
 
     private static TableDefinition VCluster() =>
         new RvSheetBuilder<ClusterRow>("vCluster").ExtrasFrom(r => r.Cluster)
@@ -411,10 +439,10 @@ public static class RvToolsTables
                 "Port groups / VLAN interfaces.", scopeOf: r => Scope(r.Host));
 
     private static TableDefinition DvSwitch() =>
-        new RvSheetBuilder<VmRow>("dvSwitch").Build(_ => [], "Distributed switches (VMware only).");
+        RawSheet("dvSwitch", "Distributed switches (vCenter).");
 
     private static TableDefinition DvPort() =>
-        new RvSheetBuilder<VmRow>("dvPort").Build(_ => [], "Distributed port groups (VMware only).");
+        RawSheet("dvPort", "Distributed port groups (vCenter).");
 
     private static TableDefinition VScVmk() =>
         new RvSheetBuilder<HostIpRow>("vSC_VMK").ExtrasFrom(r => r.Ip)
@@ -464,13 +492,13 @@ public static class RvToolsTables
             && v.Disks.Any(d => DiskOn(d, r.Ds)));
 
     private static TableDefinition VMultiPath() =>
-        new RvSheetBuilder<VmRow>("vMultiPath").Build(_ => [], "Storage multipathing (VMware only).");
+        RawSheet("vMultiPath", "Storage multipathing (ESXi).");
 
     private static TableDefinition VLicense() =>
-        new RvSheetBuilder<VmRow>("vLicense").Build(_ => [], "Licenses (VMware only).");
+        RawSheet("vLicense", "Licenses (vCenter / ESXi).");
 
     private static TableDefinition VFileInfo() =>
-        new RvSheetBuilder<VmRow>("vFileInfo").Build(_ => [], "Datastore file listing (not collected).");
+        RawSheet("vFileInfo", "Datastore file listing.");
 
     private static TableDefinition VHealth() =>
         new RvSheetBuilder<HealthRow>("vHealth")

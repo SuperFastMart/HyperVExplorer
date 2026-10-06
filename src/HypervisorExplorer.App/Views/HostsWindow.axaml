@@ -1,0 +1,67 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:HypervisorExplorer.App.ViewModels"
+        xmlns:cfg="using:HypervisorExplorer.Core.Config"
+        x:Class="HypervisorExplorer.App.Views.HostsWindow"
+        x:DataType="vm:HostsViewModel"
+        Title="Saved hosts" Width="1000" Height="600" MinWidth="760" MinHeight="420"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <Grid Margin="16" ColumnDefinitions="*,16,280" RowDefinitions="Auto,*,Auto">
+        <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,10">
+            <TextBlock Classes="h1" Text="Saved hosts" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <Button Classes="primary" Content="Connect selected" Command="{Binding ConnectCheckedCommand}"/>
+            <Button Content="Add…" Command="{Binding AddHostCommand}"/>
+            <Button Content="Edit…" Command="{Binding EditHostCommand}"/>
+            <Button Content="Remove" Command="{Binding DeleteHostCommand}"/>
+            <Button Content="Tick all" Command="{Binding SelectAllCommand}"/>
+        </StackPanel>
+
+        <Border Grid.Row="1" Classes="panel">
+            <DataGrid ItemsSource="{Binding Hosts}" SelectedItem="{Binding SelectedHost}" IsReadOnly="False"
+                      CanUserSortColumns="True" HeadersVisibility="Column" DoubleTapped="OnHostDoubleTapped">
+                <DataGrid.Columns>
+                    <DataGridCheckBoxColumn Header="" Binding="{Binding IsChecked}" Width="40"/>
+                    <DataGridTextColumn Header="Host" Binding="{Binding Label}" Width="2*" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Platform" Binding="{Binding Platform}" Width="*" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Group" Binding="{Binding Group}" Width="*" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Credentials" Binding="{Binding Credentials}" Width="2*" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Last connected" Binding="{Binding LastConnected}" Width="*" IsReadOnly="True"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+
+        <TextBlock Grid.Column="2" Classes="h1" Text="Groups" VerticalAlignment="Center" Margin="0,0,0,10"/>
+        <DockPanel Grid.Row="1" Grid.Column="2">
+            <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,8,0,0">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Button Content="New…" Command="{Binding AddGroupCommand}"/>
+                    <Button Content="Edit…" Command="{Binding EditGroupCommand}"/>
+                    <Button Content="Delete" Command="{Binding DeleteGroupCommand}"/>
+                </StackPanel>
+                <Button Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                        Content="Connect whole group" Command="{Binding ConnectGroupCommand}"/>
+            </StackPanel>
+            <Border Classes="panel">
+                <ListBox ItemsSource="{Binding Groups}" SelectedItem="{Binding SelectedGroup}" Background="Transparent">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="cfg:HostGroup">
+                            <StackPanel>
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                <TextBlock Classes="subtle" Text="{Binding Username}"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+        </DockPanel>
+
+        <Grid Grid.Row="2" Grid.ColumnSpan="3" ColumnDefinitions="*,Auto" Margin="0,12,0,0">
+            <TextBlock Classes="subtle" Text="{Binding Status}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                <Button Content="Import from Hyper-V Explorer v2…" Command="{Binding ImportLegacyCommand}"
+                        ToolTip.Tip="Import hosts, groups and credentials from the old PowerShell tool"/>
+                <Button Content="Close" Click="OnClose" IsCancel="True"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

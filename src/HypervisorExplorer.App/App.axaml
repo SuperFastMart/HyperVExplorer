@@ -1,0 +1,27 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="HypervisorExplorer.App.App"
+             RequestedThemeVariant="Dark">
+
+    <Application.Resources>
+        <ResourceDictionary>
+            <Color x:Key="SystemAccentColor">#5B8DEF</Color>
+            <SolidColorBrush x:Key="ShellBackground" Color="#14171F"/>
+            <SolidColorBrush x:Key="PanelBackground" Color="#1B1F29"/>
+            <SolidColorBrush x:Key="PanelBorder" Color="#2A3040"/>
+            <SolidColorBrush x:Key="ToolbarBackground" Color="#191D27"/>
+            <SolidColorBrush x:Key="SubtleText" Color="#8C95A8"/>
+            <SolidColorBrush x:Key="AccentText" Color="#8FB2FF"/>
+            <SolidColorBrush x:Key="OkBrush" Color="#5FCB8A"/>
+            <SolidColorBrush x:Key="WarnBrush" Color="#E9B44C"/>
+            <SolidColorBrush x:Key="ErrorBrush" Color="#F06A6A"/>
+            <SolidColorBrush x:Key="RowAlt" Color="#1E2330"/>
+        </ResourceDictionary>
+    </Application.Resources>
+
+    <Application.Styles>
+        <FluentTheme />
+        <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
+        <StyleInclude Source="avares://HypervisorExplorer.App/Styles/AppStyles.axaml"/>
+    </Application.Styles>
+</Application>
