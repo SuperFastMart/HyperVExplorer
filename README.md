@@ -28,14 +28,14 @@ Inventory for a mixed hypervisor estate. Connect to **Microsoft Hyper-V** (inclu
 
 ## Getting started
 
-1. Download the latest release (**v3.0.0**) and unzip it. Nothing needs installing: it's a self-contained .NET 10 build.
-   - Windows: [HypervisorExplorer-3.0.0-win-x64.zip](https://github.com/SuperFastMart/HyperVExplorer/releases/download/v3.0.0/HypervisorExplorer-3.0.0-win-x64.zip)
-   - macOS (Apple Silicon): [HypervisorExplorer-3.0.0-osx-arm64.zip](https://github.com/SuperFastMart/HyperVExplorer/releases/download/v3.0.0/HypervisorExplorer-3.0.0-osx-arm64.zip). On first launch, right-click the app → **Open**.
+1. Download the latest release (**v3.0.1**) and unzip it. Nothing needs installing: it's a self-contained .NET 10 build.
+   - Windows: [HypervisorExplorer-3.0.1-win-x64.zip](https://github.com/SuperFastMart/HyperVExplorer/releases/download/v3.0.1/HypervisorExplorer-3.0.1-win-x64.zip)
+   - macOS (Intel and Apple Silicon): [HypervisorExplorer-3.0.1-macos-universal.zip](https://github.com/SuperFastMart/HyperVExplorer/releases/download/v3.0.1/HypervisorExplorer-3.0.1-macos-universal.zip). On first launch, right-click the app → **Open**.
    - All versions: [Releases](../../releases)
 2. Run `HypervisorExplorer.exe` (or **Hypervisor Explorer.app**) and click **+ Connect**, or use **View → Load demo data** to look around first.
 3. Use **Export → RVTools-compatible workbook** to produce the `.xlsx`.
 
-The app also runs natively on macOS (Apple Silicon build in the releases) and Linux, with the same features: VMware, Proxmox and Hyper-V can all be collected from a Mac. On macOS, sign in to Hyper-V with `DOMAIN\user` and a password; integrated Windows sign-in is only available on Windows.
+The app also runs natively on macOS (one download for Intel and Apple Silicon Macs) and Linux, with the same features: VMware, Proxmox and Hyper-V can all be collected from a Mac. On macOS, sign in to Hyper-V with `DOMAIN\user` and a password; integrated Windows sign-in is only available on Windows.
 
 ### Hyper-V hosts you can't reach over WinRM
 
@@ -73,8 +73,8 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 ```bash
 dotnet test tests/HypervisorExplorer.Tests      # unit tests (collectors run against recorded API fixtures)
 dotnet run --project src/HypervisorExplorer.App  # run the desktop app
-pwsh ./build/publish.ps1 -Version v3.0.0         # single-file win-x64 exes + zip in artifacts/publish
-./build/package-macos.sh v3.0.0                  # Hypervisor Explorer.app + hvexplorer for Apple Silicon
+pwsh ./build/publish.ps1 -Version v3.0.1         # single-file win-x64 exes + zip in artifacts/publish
+./build/package-macos.sh v3.0.1                  # Hypervisor Explorer.app + hvexplorer (Intel + Apple Silicon)
 ```
 
 Pushing a `v*` tag runs the GitHub Actions workflow, which tests, publishes and attaches the zip to a release.
