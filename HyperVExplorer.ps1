@@ -347,6 +347,8 @@ function Get-GroupCredential {
                 <Rectangle Width="1" Fill="{StaticResource BgLight}" Margin="16,2" VerticalAlignment="Stretch"/>
                 <Button x:Name="btnExport" Content="&#x1F4BE; Export CSV" Margin="0,0,0,0"
                         Background="#3a4a3a" Foreground="{StaticResource AccentGreen}" IsEnabled="False"/>
+                <Button x:Name="btnExportXlsx" Content="&#x1F4CA; Export RVTools XLSX" Margin="8,0,0,0"
+                        Background="#3a3a4a" Foreground="{StaticResource AccentBlue}" IsEnabled="False"/>
                 <Button x:Name="btnClear" Content="Clear All" Margin="8,0,0,0" IsEnabled="False"/>
             </StackPanel>
         </Border>
@@ -434,6 +436,7 @@ $btnGroups       = $Window.FindName("btnGroups")
 $btnDisconnect    = $Window.FindName("btnDisconnect")
 $btnDisconnectAll = $Window.FindName("btnDisconnectAll")
 $btnExport        = $Window.FindName("btnExport")
+$btnExportXlsx    = $Window.FindName("btnExportXlsx")
 $btnClear        = $Window.FindName("btnClear")
 $btnHistory      = $Window.FindName("btnHistory")
 $dgVMs           = $Window.FindName("dgVMs")
@@ -447,26 +450,29 @@ $dgVMs.ItemsSource = $script:VMData
 $script:ConnectedHosts = @{}  # HostName -> @{ Credential = $cred; VMCount = N }
 $script:AppConfig = Load-Config
 
-# ---- Check local WinRM service at startup ----
-$WinRMService = Get-Service -Name WinRM -ErrorAction SilentlyContinue
-if ($WinRMService -and $WinRMService.Status -ne 'Running') {
+# ---- WinRM check: runs on-demand before Hyper-V connections, not at startup ----
+function Ensure-WinRM {
+    $svc = Get-Service -Name WinRM -ErrorAction SilentlyContinue
+    if ($svc -and $svc.Status -eq 'Running') { return $true }
     $StartIt = [System.Windows.MessageBox]::Show(
-        "The WinRM service is not running on this machine.`n`nIt is required for remote connections. Start it now?",
+        "The WinRM service is not running.`n`nIt is required for Hyper-V connections. Start it now?",
         "WinRM Service Required",
         [System.Windows.MessageBoxButton]::YesNo,
         [System.Windows.MessageBoxImage]::Question)
     if ($StartIt -eq 'Yes') {
         try {
             Start-Service -Name WinRM -ErrorAction Stop
-        }
-        catch {
+            return $true
+        } catch {
             [System.Windows.MessageBox]::Show(
                 "Could not start WinRM service.`n`nError: $($_.Exception.Message)`n`nTry running as Administrator.",
                 "Service Error",
                 [System.Windows.MessageBoxButton]::OK,
                 [System.Windows.MessageBoxImage]::Error)
+            return $false
         }
     }
+    return $false
 }
 
 # ---- Toggle "Use current user" visibility based on selected platform ----
@@ -488,6 +494,7 @@ function Update-StatusBar {
     $txtVMCount.Text = "$vmCount VMs | $hostCount Hosts"
     $hasData = $vmCount -gt 0
     $btnExport.IsEnabled        = $hasData
+    $btnExportXlsx.IsEnabled    = $hasData
     $btnClear.IsEnabled         = $hasData
     $btnDisconnect.IsEnabled    = $hasData
     $btnDisconnectAll.IsEnabled = $hasData
@@ -1942,14 +1949,25 @@ function Get-PveGroupAuth {
     if ($authType -eq "token") {
         $result.TokenId = $Group.pveTokenId
         if ($Group.encryptedPveTokenSecret) {
-            try { $result.TokenSecret = $Group.encryptedPveTokenSecret | ConvertTo-SecureString }
-            catch { }
+            try {
+                $sec = $Group.encryptedPveTokenSecret | ConvertTo-SecureString -ErrorAction Stop
+                # Verify decryption actually produced a value
+                $plain = [System.Net.NetworkCredential]::new('', $sec).Password
+                if ($plain) { $result.TokenSecret = $sec }
+            } catch {
+                # DPAPI decryption failed (different runtime context) -- will prompt for fresh creds
+            }
         }
     } else {
         $result.Username = $Group.pveUsername
         if ($Group.encryptedPvePassword) {
-            try { $result.Password = $Group.encryptedPvePassword | ConvertTo-SecureString }
-            catch { }
+            try {
+                $sec = $Group.encryptedPvePassword | ConvertTo-SecureString -ErrorAction Stop
+                $plain = [System.Net.NetworkCredential]::new('', $sec).Password
+                if ($plain) { $result.Password = $sec }
+            } catch {
+                # DPAPI decryption failed -- will prompt for fresh creds
+            }
         }
     }
     return $result
@@ -2656,6 +2674,7 @@ $btnConnect.Add_Click({
                     else { "hyperv" }
 
         if ($hostType -eq "hyperv") {
+            if (-not (Ensure-WinRM)) { return }
             $UseCurrentUser = $chkCurrentUser.IsChecked -eq $true
             $result = Connect-HyperVHost -TargetHost $TargetHost -UseCurrentUser $UseCurrentUser
         }
@@ -2672,6 +2691,17 @@ $btnConnect.Add_Click({
                 $tokenSecret = $pveAuth.TokenSecret
                 $pveUser = $pveAuth.Username
                 $pvePass = $pveAuth.Password
+
+                # If stored credentials couldn't be decrypted, prompt for fresh ones
+                $needsPrompt = ($authType -eq "token" -and (-not $tokenSecret)) -or
+                               ($authType -eq "password" -and (-not $pvePass))
+                if ($needsPrompt) {
+                    $creds = Show-PveCredentialDialog -TargetHost $TargetHost -DefaultPort $port
+                    if (-not $creds) { return }
+                    $port = $creds.Port; $authType = $creds.AuthType
+                    $tokenId = $creds.TokenId; $tokenSecret = $creds.TokenSecret
+                    $pveUser = $creds.Username; $pvePass = $creds.Password
+                }
             } else {
                 $defaultPort = if ($hostType -eq "proxmox-pdm") { 8443 } else { 8006 }
                 $creds = Show-PveCredentialDialog -TargetHost $TargetHost -DefaultPort $defaultPort
@@ -2712,6 +2742,18 @@ $btnBulkConnect.Add_Click({
     $failed = 0
     $failedHosts = @()
 
+    # Check WinRM once before bulk loop if any Hyper-V hosts are present
+    $hasHyperV = $false
+    foreach ($h in $selectedHosts) {
+        $g = Get-GroupForHost -Address $h
+        $t = if ($g -and $g.type) { $g.type } else { "hyperv" }
+        if ($t -eq "hyperv") { $hasHyperV = $true; break }
+    }
+    if ($hasHyperV -and -not (Ensure-WinRM)) {
+        Set-Status "Bulk connect cancelled -- WinRM not available." "#f38ba8"
+        return
+    }
+
     for ($i = 0; $i -lt $total; $i++) {
         $host_ = $selectedHosts[$i]
         Set-Status "Bulk connect: $($i + 1) of $total -- $host_ ..." "#89b4fa"
@@ -2726,6 +2768,15 @@ $btnBulkConnect.Add_Click({
                 # Proxmox connection
                 $pveAuth = Get-PveGroupAuth -Group $hostGroup
                 $port = if ($hostGroup.port) { [int]$hostGroup.port } else { if ($groupType -eq "proxmox-pdm") { 8443 } else { 8006 } }
+
+                # Check if credentials could be decrypted
+                $credsOk = ($pveAuth.AuthType -eq "token" -and $pveAuth.TokenSecret) -or
+                           ($pveAuth.AuthType -eq "password" -and $pveAuth.Password)
+                if (-not $credsOk) {
+                    $failedHosts += "$host_ (stored credentials could not be decrypted -- connect manually to re-enter)"
+                    $failed++
+                    continue
+                }
 
                 if ($groupType -eq "proxmox-pdm") {
                     $result = Connect-ProxmoxPDM -TargetHost $host_ -Port $port `
@@ -2860,6 +2911,608 @@ $btnExport.Add_Click({
             [System.Windows.MessageBox]::Show("Export failed: $($_.Exception.Message)",
                 "Export Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
         }
+    }
+})
+
+# ---- Export RVTools-compatible XLSX button ----
+$btnExportXlsx.Add_Click({
+    # Helper: load ImportExcel module, unblocking files if needed
+    function Load-ImportExcel {
+        # First try a simple import
+        try {
+            Import-Module ImportExcel -ErrorAction Stop
+            return $true
+        } catch { }
+
+        # If that failed, find the module and unblock its files (removes internet zone flag)
+        $mod = Get-Module -ListAvailable -Name ImportExcel | Select-Object -First 1
+        if ($mod) {
+            try {
+                Get-ChildItem $mod.ModuleBase -Recurse | Unblock-File -ErrorAction SilentlyContinue
+                Import-Module ImportExcel -ErrorAction Stop
+                return $true
+            } catch { }
+        }
+
+        # Last resort: try setting execution policy for this process
+        try {
+            Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction Stop
+            Import-Module ImportExcel -ErrorAction Stop
+            return $true
+        } catch { }
+
+        return $false
+    }
+
+    # Check if ImportExcel module is available
+    $importExcelAvailable = Get-Module -ListAvailable -Name ImportExcel
+    if (-not $importExcelAvailable) {
+        $installChoice = [System.Windows.MessageBox]::Show(
+            "The ImportExcel PowerShell module is required for XLSX export.`n`nInstall it now? (Install-Module ImportExcel -Scope CurrentUser)",
+            "Module Required",
+            [System.Windows.MessageBoxButton]::YesNo,
+            [System.Windows.MessageBoxImage]::Question)
+        if ($installChoice -eq 'Yes') {
+            try {
+                Set-Status "Installing ImportExcel module..." "#f9e2af"
+                Install-Module ImportExcel -Scope CurrentUser -Force -ErrorAction Stop
+                # Unblock freshly downloaded files
+                $mod = Get-Module -ListAvailable -Name ImportExcel | Select-Object -First 1
+                if ($mod) { Get-ChildItem $mod.ModuleBase -Recurse | Unblock-File -ErrorAction SilentlyContinue }
+                Set-Status "ImportExcel module installed." "#a6e3a1"
+            } catch {
+                [System.Windows.MessageBox]::Show("Failed to install ImportExcel module:`n`n$($_.Exception.Message)`n`nTry running in PowerShell:`n  Install-Module ImportExcel -Scope CurrentUser",
+                    "Install Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+                return
+            }
+        } else { return }
+    }
+
+    # Load the module (with unblock fallback)
+    if (-not (Load-ImportExcel)) {
+        [System.Windows.MessageBox]::Show(
+            "Could not load the ImportExcel module.`n`nThis is usually caused by execution policy. Try running this in an elevated PowerShell window:`n`n  Get-ChildItem (Get-Module -ListAvailable ImportExcel).ModuleBase -Recurse | Unblock-File`n`nThen try the export again.",
+            "Module Load Failed",
+            [System.Windows.MessageBoxButton]::OK,
+            [System.Windows.MessageBoxImage]::Warning)
+        return
+    }
+
+    $SaveDialog = [Microsoft.Win32.SaveFileDialog]::new()
+    $SaveDialog.Filter = "Excel Files (*.xlsx)|*.xlsx"
+    $SaveDialog.FileName = "RVTools_Export_$(Get-Date -Format 'yyyyMMdd_HHmmss').xlsx"
+    $SaveDialog.Title = "Export RVTools-Compatible XLSX"
+
+    if ($SaveDialog.ShowDialog() -ne $true) { return }
+
+    try {
+        Set-Status "Building RVTools export..." "#f9e2af"
+        $outFile = $SaveDialog.FileName
+
+        # Delete existing file if present (Export-Excel appends by default)
+        if (Test-Path $outFile) { Remove-Item $outFile -Force }
+
+        # Helper: map powerstate to RVTools format
+        function ConvertTo-RVToolsPowerstate {
+            param([string]$State)
+            switch -Wildcard ($State.ToLower()) {
+                "running"   { "poweredOn" }
+                "poweredon" { "poweredOn" }
+                "off"       { "poweredOff" }
+                "stopped"   { "poweredOff" }
+                "poweredoff" { "poweredOff" }
+                "paused"    { "suspended" }
+                "suspended" { "suspended" }
+                "saved"     { "suspended" }
+                default     { $State }
+            }
+        }
+
+        # Helper: parse disk string to get total provisioned and in-use MiB
+        function Get-DiskTotals {
+            param([string]$DiskStr)
+            $provisionedMiB = 0
+            $inUseMiB = 0
+            $diskCount = 0
+            if ($DiskStr -and $DiskStr -ne "None") {
+                foreach ($d in ($DiskStr -split ';\s*')) {
+                    $diskCount++
+                    # Hyper-V format: "SCSI#0: path (Size: 60 GB, Used: 25.5 GB)"
+                    if ($d -match 'Size:\s*([\d.]+)\s*GB') {
+                        $provisionedMiB += [math]::Round([double]$Matches[1] * 1024, 0)
+                    }
+                    if ($d -match 'Used:\s*([\d.]+)\s*GB') {
+                        $inUseMiB += [math]::Round([double]$Matches[1] * 1024, 0)
+                    }
+                    # Proxmox format: "scsi0: storage (Size: 32G)"
+                    if ($d -match 'Size:\s*([\d.]+)G\)') {
+                        if ($provisionedMiB -eq 0 -or $d -notmatch 'GB') {
+                            $provisionedMiB += [math]::Round([double]$Matches[1] * 1024, 0)
+                        }
+                    }
+                    # Proxmox format: "Size: 32T" (terabytes)
+                    if ($d -match 'Size:\s*([\d.]+)T\)') {
+                        $provisionedMiB += [math]::Round([double]$Matches[1] * 1024 * 1024, 0)
+                    }
+                }
+            }
+            @{ Provisioned = $provisionedMiB; InUse = $inUseMiB; Count = $diskCount }
+        }
+
+        # Helper: count NICs
+        function Get-NicCount {
+            param([string]$NicStr)
+            if (-not $NicStr -or $NicStr -eq "None") { return 0 }
+            @($NicStr -split ';\s*').Count
+        }
+
+        # Helper: firmware from generation
+        function Get-Firmware {
+            param($Generation, $Platform)
+            if ($Platform -eq "Hyper-V") {
+                if ($Generation -eq 2) { "efi" } else { "bios" }
+            } else { "bios" }
+        }
+
+        # ===================== vInfo tab =====================
+        $vInfo = foreach ($vm in $script:VMData) {
+            $diskTotals = Get-DiskTotals $vm.Disks
+            $nicCount = Get-NicCount $vm.NICs
+            $powerstate = ConvertTo-RVToolsPowerstate $vm.State
+
+            # Parse individual network names
+            $netNames = @()
+            if ($vm.NICs -and $vm.NICs -ne "None") {
+                foreach ($n in ($vm.NICs -split ';\s*')) {
+                    # Hyper-V: "Name [Switch: SwitchName, ..."
+                    if ($n -match 'Switch:\s*([^,\]]+)') { $netNames += $Matches[1].Trim() }
+                    # Proxmox: "net0 [virtio Bridge: vmbr0, ..."
+                    elseif ($n -match 'Bridge:\s*([^,\]]+)') { $netNames += $Matches[1].Trim() }
+                    else { $netNames += "" }
+                }
+            }
+
+            # Parse primary IP from Hyper-V NIC string
+            $primaryIP = ""
+            if ($vm.NICs -match 'IPs:\s*([^]\s,]+)') { $primaryIP = $Matches[1] }
+
+            [PSCustomObject]@{
+                'VM'                                      = $vm.VMName
+                'Powerstate'                              = $powerstate
+                'Template'                                = "False"
+                'SRM Placeholder'                         = "False"
+                'Config status'                           = ""
+                'DNS Name'                                = ""
+                'Connection state'                        = if ($powerstate -eq "poweredOn") { "connected" } else { "" }
+                'Guest state'                             = if ($powerstate -eq "poweredOn") { "running" } else { "" }
+                'Heartbeat'                               = ""
+                'Consolidation Needed'                    = "False"
+                'PowerOn'                                 = ""
+                'Suspended To Memory'                     = ""
+                'Suspend time'                            = ""
+                'Suspend Interval'                        = ""
+                'Creation date'                           = ""
+                'Change Version'                          = ""
+                'CPUs'                                    = $vm.CPUCount
+                'Overall Cpu Readiness'                   = ""
+                'Memory'                                  = $vm.MemoryAssignedMB
+                'Active Memory'                           = ""
+                'NICs'                                    = $nicCount
+                'Disks'                                   = $diskTotals.Count
+                'Total disk capacity MiB'                 = $diskTotals.Provisioned
+                'Fixed Passthru HotPlug'                  = ""
+                'min Required EVC Mode Key'               = ""
+                'Latency Sensitivity'                     = ""
+                'Op Notification Timeout'                 = ""
+                'EnableUUID'                              = ""
+                'CBT'                                     = ""
+                'Primary IP Address'                      = $primaryIP
+                'Network #1'                              = if ($netNames.Count -ge 1) { $netNames[0] } else { "" }
+                'Network #2'                              = if ($netNames.Count -ge 2) { $netNames[1] } else { "" }
+                'Network #3'                              = if ($netNames.Count -ge 3) { $netNames[2] } else { "" }
+                'Network #4'                              = if ($netNames.Count -ge 4) { $netNames[3] } else { "" }
+                'Network #5'                              = ""
+                'Network #6'                              = ""
+                'Network #7'                              = ""
+                'Network #8'                              = ""
+                'Num Monitors'                            = ""
+                'Video Ram KiB'                           = ""
+                'Resource pool'                           = ""
+                'Folder ID'                               = ""
+                'Folder'                                  = ""
+                'vApp'                                    = ""
+                'DAS protection'                          = ""
+                'FT State'                                = "notConfigured"
+                'FT Role'                                 = ""
+                'FT Latency'                              = ""
+                'FT Bandwidth'                            = ""
+                'FT Sec. Latency'                         = ""
+                'Vm Failover In Progress'                 = "False"
+                'Provisioned MiB'                         = $diskTotals.Provisioned
+                'In Use MiB'                              = $diskTotals.InUse
+                'Unshared MiB'                            = $diskTotals.InUse
+                'HA Restart Priority'                     = ""
+                'HA Isolation Response'                   = ""
+                'HA VM Monitoring'                        = ""
+                'Cluster rule(s)'                         = ""
+                'Cluster rule name(s)'                    = ""
+                'Boot Required'                           = ""
+                'Boot delay'                              = 0
+                'Boot retry delay'                        = 10000
+                'Boot retry enabled'                      = "False"
+                'Boot BIOS setup'                         = "False"
+                'Reboot PowerOff'                         = ""
+                'EFI Secure boot'                         = "False"
+                'Firmware'                                = Get-Firmware $vm.Generation $vm.Platform
+                'HW version'                              = ""
+                'HW upgrade status'                       = ""
+                'HW upgrade policy'                       = ""
+                'HW target'                               = ""
+                'Path'                                    = ""
+                'Log directory'                           = ""
+                'Snapshot directory'                       = ""
+                'Suspend directory'                       = ""
+                'Annotation'                              = ""
+                'Datacenter'                              = $vm.Platform
+                'Cluster'                                 = ""
+                'Host'                                    = $vm.HostName
+                'OS according to the configuration file'  = ""
+                'OS according to the VMware Tools'        = ""
+                'Customization Info'                      = ""
+                'Guest Detailed Data'                     = ""
+                'VM ID'                                   = ""
+                'SMBIOS UUID'                             = ""
+                'VM UUID'                                 = ""
+                'VI SDK Server type'                      = $vm.HostVersion
+                'VI SDK API Version'                      = ""
+                'VI SDK Server'                           = $vm.HostName
+                'VI SDK UUID'                             = $vm.HostName
+            }
+        }
+
+        # ===================== vHost tab =====================
+        # Deduplicate hosts
+        $hostMap = @{}
+        foreach ($vm in $script:VMData) {
+            if (-not $hostMap.ContainsKey($vm.HostName)) {
+                $hostMap[$vm.HostName] = @{
+                    Platform = $vm.Platform; HostCPU = $vm.HostCPU
+                    HostMemoryGB = $vm.HostMemoryGB; HostVersion = $vm.HostVersion
+                    VMCount = 1; TotalvCPUs = [int]$vm.CPUCount; TotalvRAM = [int]$vm.MemoryAssignedMB
+                }
+            } else {
+                $hostMap[$vm.HostName].VMCount++
+                $hostMap[$vm.HostName].TotalvCPUs += [int]$vm.CPUCount
+                $hostMap[$vm.HostName].TotalvRAM += [int]$vm.MemoryAssignedMB
+            }
+        }
+
+        $vHost = foreach ($h in $hostMap.GetEnumerator()) {
+            $info = $h.Value
+            $memMB = [math]::Round($info.HostMemoryGB * 1024, 0)
+            $cores = if ($info.HostCPU) { [int]$info.HostCPU } else { 0 }
+            $vmsPerCore = if ($cores -gt 0) { [math]::Round($info.VMCount / $cores, 2) } else { 0 }
+            $vcpusPerCore = if ($cores -gt 0) { [math]::Round($info.TotalvCPUs / $cores, 2) } else { 0 }
+            $memPct = if ($memMB -gt 0) { [math]::Round(($info.TotalvRAM / $memMB) * 100, 0) } else { 0 }
+
+            [PSCustomObject]@{
+                'Host'                          = $h.Key
+                'Datacenter'                    = $info.Platform
+                'Cluster'                       = ""
+                'Config status'                 = ""
+                'Compliance Check State'        = ""
+                'in Maintenance Mode'           = "False"
+                'in Quarantine Mode'            = ""
+                'vSAN Fault Domain Name'        = ""
+                'CPU Model'                     = ""
+                'Speed'                         = ""
+                'HT Available'                  = ""
+                'HT Active'                     = ""
+                '# CPU'                         = ""
+                'Cores per CPU'                 = ""
+                '# Cores'                       = $cores
+                'CPU usage %'                   = ""
+                '# Memory'                      = $memMB
+                'Memory Tiering Type'           = ""
+                'Memory usage %'                = $memPct
+                'Console'                       = ""
+                '# NICs'                        = ""
+                '# HBAs'                        = ""
+                '# VMs total'                   = $info.VMCount
+                '# VMs'                         = $info.VMCount
+                'VMs per Core'                  = $vmsPerCore
+                '# vCPUs'                       = $info.TotalvCPUs
+                'vCPUs per Core'                = $vcpusPerCore
+                'vRAM'                          = $info.TotalvRAM
+                'VM Used memory'                = ""
+                'VM Memory Swapped'             = ""
+                'VM Memory Ballooned'           = ""
+                'VMotion support'               = ""
+                'Storage VMotion support'       = ""
+                'Current EVC'                   = ""
+                'Max EVC'                       = ""
+                'Assigned License(s)'           = ""
+                'ATS Heartbeat'                 = ""
+                'ATS Locking'                   = ""
+                'Current CPU power man. policy' = ""
+                'Supported CPU power man.'      = ""
+                'Host Power Policy'             = ""
+                'ESX Version'                   = $info.HostVersion
+                'Boot time'                     = ""
+                'DNS Servers'                   = ""
+                'DHCP'                          = ""
+                'Domain'                        = ""
+                'Domain List'                   = ""
+                'DNS Search Order'              = ""
+                'NTP Server(s)'                 = ""
+                'NTPD running'                  = ""
+                'Time Zone'                     = ""
+                'Time Zone Name'                = ""
+                'GMT Offset'                    = ""
+                'Vendor'                        = ""
+                'Model'                         = ""
+                'Serial number'                 = ""
+                'Service tag'                   = ""
+                'OEM specific string'           = ""
+                'BIOS Vendor'                   = ""
+                'BIOS Version'                  = ""
+                'BIOS Date'                     = ""
+                'Certificate Issuer'            = ""
+                'Certificate Start Date'        = ""
+                'Certificate Expiry Date'       = ""
+                'Certificate Status'            = ""
+                'Certificate Subject'           = ""
+                'Object ID'                     = ""
+                'UUID'                          = ""
+                'VI SDK Server'                 = $h.Key
+                'VI SDK UUID'                   = $h.Key
+            }
+        }
+
+        # ===================== vCPU tab =====================
+        $vCPU = foreach ($vm in $script:VMData) {
+            [PSCustomObject]@{
+                'VM'                                     = $vm.VMName
+                'Powerstate'                             = ConvertTo-RVToolsPowerstate $vm.State
+                'Template'                               = "False"
+                'SRM Placeholder'                        = "False"
+                'CPUs'                                   = $vm.CPUCount
+                'Sockets'                                = ""
+                'Cores p/s'                              = ""
+                'Max'                                    = ""
+                'Overall'                                = ""
+                'Level'                                  = ""
+                'Shares'                                 = ""
+                'Reservation'                            = ""
+                'Entitlement'                            = ""
+                'DRS Entitlement'                        = ""
+                'Limit'                                  = ""
+                'Hot Add'                                = ""
+                'Hot Remove'                             = ""
+                'Numa Hotadd Exposed'                    = ""
+                'Annotation'                             = ""
+                'Datacenter'                             = $vm.Platform
+                'Cluster'                                = ""
+                'Host'                                   = $vm.HostName
+                'Folder'                                 = ""
+                'OS according to the configuration file' = ""
+                'OS according to the VMware Tools'       = ""
+                'VM ID'                                  = ""
+                'VM UUID'                                = ""
+                'VI SDK Server'                          = $vm.HostName
+                'VI SDK UUID'                            = $vm.HostName
+            }
+        }
+
+        # ===================== vMemory tab =====================
+        $vMemory = foreach ($vm in $script:VMData) {
+            [PSCustomObject]@{
+                'VM'                                     = $vm.VMName
+                'Powerstate'                             = ConvertTo-RVToolsPowerstate $vm.State
+                'Template'                               = "False"
+                'SRM Placeholder'                        = "False"
+                'Size MiB'                               = $vm.MemoryAssignedMB
+                'Memory Reservation Locked To Max'       = ""
+                'Overhead'                               = ""
+                'Max'                                    = ""
+                'Consumed'                               = ""
+                'Consumed Overhead'                      = ""
+                'Private'                                = ""
+                'Shared'                                 = ""
+                'Swapped'                                = ""
+                'Ballooned'                              = ""
+                'Active'                                 = ""
+                'Entitlement'                            = ""
+                'DRS Entitlement'                        = ""
+                'Level'                                  = ""
+                'Shares'                                 = ""
+                'Reservation'                            = ""
+                'Limit'                                  = ""
+                'Hot Add'                                = $vm.DynamicMemory
+                'Annotation'                             = ""
+                'Datacenter'                             = $vm.Platform
+                'Cluster'                                = ""
+                'Host'                                   = $vm.HostName
+                'Folder'                                 = ""
+                'OS according to the configuration file' = ""
+                'OS according to the VMware Tools'       = ""
+                'VM ID'                                  = ""
+                'VM UUID'                                = ""
+                'VI SDK Server'                          = $vm.HostName
+                'VI SDK UUID'                            = $vm.HostName
+            }
+        }
+
+        # ===================== vDisk tab =====================
+        $vDisk = foreach ($vm in $script:VMData) {
+            if ($vm.Disks -and $vm.Disks -ne "None") {
+                $diskIndex = 0
+                foreach ($d in ($vm.Disks -split ';\s*')) {
+                    $diskIndex++
+                    # Parse label (e.g. "SCSI#0" or "scsi0")
+                    $diskLabel = if ($d -match '^([^:]+):') { $Matches[1].Trim() } else { "Disk $diskIndex" }
+                    # Parse path
+                    $diskPath = if ($d -match ':\s*(.+?)\s*\(') { $Matches[1].Trim() } else { "" }
+                    # Parse capacity
+                    $capMiB = 0
+                    if ($d -match 'Size:\s*([\d.]+)\s*GB') { $capMiB = [math]::Round([double]$Matches[1] * 1024, 0) }
+                    elseif ($d -match 'Size:\s*([\d.]+)G') { $capMiB = [math]::Round([double]$Matches[1] * 1024, 0) }
+                    elseif ($d -match 'Size:\s*([\d.]+)T') { $capMiB = [math]::Round([double]$Matches[1] * 1024 * 1024, 0) }
+                    # Thin provisioning
+                    $thin = if ($vm.Platform -eq "Hyper-V") { "True" } else { "" }
+
+                    [PSCustomObject]@{
+                        'VM'                                     = $vm.VMName
+                        'Powerstate'                             = ConvertTo-RVToolsPowerstate $vm.State
+                        'Template'                               = "False"
+                        'SRM Placeholder'                        = "False"
+                        'Disk'                                   = $diskIndex
+                        'Disk Key'                               = ""
+                        'Disk UUID'                              = ""
+                        'Disk Path'                              = $diskPath
+                        'Capacity MiB'                           = $capMiB
+                        'Raw'                                    = "False"
+                        'Disk Mode'                              = ""
+                        'Sharing mode'                           = ""
+                        'Thin'                                   = $thin
+                        'Eagerly Scrub'                          = ""
+                        'Split'                                  = ""
+                        'Write Through'                          = ""
+                        'Level'                                  = ""
+                        'Shares'                                 = ""
+                        'Reservation'                            = ""
+                        'Limit'                                  = ""
+                        'Controller'                             = $diskLabel
+                        'Label'                                  = "Hard disk $diskIndex"
+                        'SCSI Unit #'                            = ""
+                        'Unit #'                                 = ""
+                        'Shared Bus'                             = ""
+                        'Path'                                   = ""
+                        'Raw LUN ID'                             = ""
+                        'Raw Comp. Mode'                         = ""
+                        'Internal Sort Column'                   = $diskIndex
+                        'Annotation'                             = ""
+                        'Datacenter'                             = $vm.Platform
+                        'Cluster'                                = ""
+                        'Host'                                   = $vm.HostName
+                        'Folder'                                 = ""
+                        'OS according to the configuration file' = ""
+                        'OS according to the VMware Tools'       = ""
+                        'VM ID'                                  = ""
+                        'VM UUID'                                = ""
+                        'VI SDK Server'                          = $vm.HostName
+                        'VI SDK UUID'                            = $vm.HostName
+                    }
+                }
+            }
+        }
+
+        # ===================== vNetwork tab =====================
+        $vNetwork = foreach ($vm in $script:VMData) {
+            if ($vm.NICs -and $vm.NICs -ne "None") {
+                $nicIndex = 0
+                foreach ($n in ($vm.NICs -split ';\s*')) {
+                    $nicIndex++
+                    # Parse NIC label
+                    $nicLabel = "Network adapter $nicIndex"
+                    # Parse adapter type
+                    $adapter = ""
+                    if ($n -match '\[(virtio|e1000|vmxnet3|rtl)') { $adapter = $Matches[1] }
+                    # Parse network/switch name
+                    $network = ""
+                    if ($n -match 'Switch:\s*([^,\]]+)') { $network = $Matches[1].Trim() }
+                    elseif ($n -match 'Bridge:\s*([^,\]]+)') { $network = $Matches[1].Trim() }
+                    # Parse MAC
+                    $mac = ""
+                    if ($n -match 'MAC:\s*([^,\]]+)') { $mac = $Matches[1].Trim() }
+                    # Parse IP
+                    $ipv4 = ""
+                    if ($n -match 'IPs:\s*([^]\s,]+)') { $ipv4 = $Matches[1].Trim() }
+
+                    [PSCustomObject]@{
+                        'VM'                                     = $vm.VMName
+                        'Powerstate'                             = ConvertTo-RVToolsPowerstate $vm.State
+                        'Template'                               = "False"
+                        'SRM Placeholder'                        = "False"
+                        'NIC label'                              = $nicLabel
+                        'Adapter'                                = $adapter
+                        'Network'                                = $network
+                        'Switch'                                 = ""
+                        'Connected'                              = if ((ConvertTo-RVToolsPowerstate $vm.State) -eq "poweredOn") { "True" } else { "False" }
+                        'Starts Connected'                       = "True"
+                        'Mac Address'                            = $mac
+                        'Type'                                   = $adapter
+                        'IPv4 Address'                           = $ipv4
+                        'IPv6 Address'                           = ""
+                        'Direct Path IO'                         = ""
+                        'Internal Sort Column'                   = $nicIndex
+                        'Annotation'                             = ""
+                        'Datacenter'                             = $vm.Platform
+                        'Cluster'                                = ""
+                        'Host'                                   = $vm.HostName
+                        'Folder'                                 = ""
+                        'OS according to the configuration file' = ""
+                        'OS according to the VMware Tools'       = ""
+                        'VM ID'                                  = ""
+                        'VM UUID'                                = ""
+                        'VI SDK Server'                          = $vm.HostName
+                        'VI SDK UUID'                            = $vm.HostName
+                    }
+                }
+            }
+        }
+
+        # ===================== vSnapshot tab =====================
+        $vSnapshot = foreach ($vm in $script:VMData) {
+            if ($vm.Checkpoints -and $vm.Checkpoints -ne "None") {
+                foreach ($snap in ($vm.Checkpoints -split ';\s*')) {
+                    if ($snap.Trim()) {
+                        [PSCustomObject]@{
+                            'VM'                                     = $vm.VMName
+                            'Powerstate'                             = ConvertTo-RVToolsPowerstate $vm.State
+                            'Name'                                   = $snap.Trim()
+                            'Description'                            = ""
+                            'Date / time'                            = ""
+                            'Filename'                               = ""
+                            'Size MiB (vmsn)'                        = ""
+                            'Size MiB (total)'                       = ""
+                            'Quiesced'                               = ""
+                            'State'                                  = ""
+                            'Annotation'                             = ""
+                            'Datacenter'                             = $vm.Platform
+                            'Cluster'                                = ""
+                            'Host'                                   = $vm.HostName
+                            'Folder'                                 = ""
+                            'OS according to the configuration file' = ""
+                            'OS according to the VMware Tools'       = ""
+                            'VM ID'                                  = ""
+                            'VM UUID'                                = ""
+                            'VI SDK Server'                          = $vm.HostName
+                            'VI SDK UUID'                            = $vm.HostName
+                        }
+                    }
+                }
+            }
+        }
+
+        # ===================== Write all tabs =====================
+        if ($vInfo)     { $vInfo     | Export-Excel -Path $outFile -WorksheetName 'vInfo'     -AutoSize -FreezeTopRow -BoldTopRow }
+        if ($vCPU)      { $vCPU      | Export-Excel -Path $outFile -WorksheetName 'vCPU'      -AutoSize -FreezeTopRow -BoldTopRow }
+        if ($vMemory)   { $vMemory   | Export-Excel -Path $outFile -WorksheetName 'vMemory'   -AutoSize -FreezeTopRow -BoldTopRow }
+        if ($vDisk)     { $vDisk     | Export-Excel -Path $outFile -WorksheetName 'vDisk'     -AutoSize -FreezeTopRow -BoldTopRow }
+        if ($vNetwork)  { $vNetwork  | Export-Excel -Path $outFile -WorksheetName 'vNetwork'  -AutoSize -FreezeTopRow -BoldTopRow }
+        if ($vSnapshot) { $vSnapshot | Export-Excel -Path $outFile -WorksheetName 'vSnapshot' -AutoSize -FreezeTopRow -BoldTopRow }
+        if ($vHost)     { $vHost     | Export-Excel -Path $outFile -WorksheetName 'vHost'     -AutoSize -FreezeTopRow -BoldTopRow }
+
+        Set-Status "RVTools XLSX exported to $outFile" "#a6e3a1"
+        [System.Windows.MessageBox]::Show(
+            "RVTools-compatible XLSX exported!`n`n$outFile`n`nTabs: vInfo, vCPU, vMemory, vDisk, vNetwork, vSnapshot, vHost",
+            "Export Successful", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+    }
+    catch {
+        [System.Windows.MessageBox]::Show("Export failed: $($_.Exception.Message)",
+            "Export Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+        Set-Status "Export failed." "#f38ba8"
     }
 })
 

@@ -11,5 +11,16 @@ $RECYCLE.BIN/
 .vscode/
 *.code-workspace
 
-# Exports
+# Exports (may contain real infrastructure data -- never commit)
 *.csv
+*.xlsx
+RVTools_*
+
+# Build output / binaries (publish via GitHub Releases instead)
+*.exe
+bin/
+obj/
+publish/
+.vs/
+*.user
+.DS_Store
