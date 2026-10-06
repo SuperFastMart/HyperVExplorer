@@ -149,7 +149,7 @@ public sealed class ConnectionManager
             Log(request.Address, $"Collected {item.Message}");
             Succeeded?.Invoke(request);
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is OperationCanceledException or CollectionException { Kind: CollectionFailure.Cancelled })
         {
             item.Status = ConnectionStatus.Cancelled;
             item.Message = "Cancelled";

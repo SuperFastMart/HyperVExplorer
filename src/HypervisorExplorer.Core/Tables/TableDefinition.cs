@@ -122,12 +122,14 @@ public sealed class RvSheetBuilder<T> where T : class
             var kind = mapped ? m.Kind : CellKind.Text;
             var get = mapped ? m.Get : null;
             var h = header;
+            var qualified = $"{_sheet}:{header}";
             columns.Add(new TableColumn(header, kind, row =>
             {
                 var r = (T)row;
                 foreach (var src in _extraSources)
                 {
-                    if (src(r) is { } obj && obj.Extra.TryGetValue(h, out var extra))
+                    // Sheet-qualified keys ("vCPU:Level") disambiguate headers reused across sheets.
+                    if (src(r) is { } obj && (obj.Extra.TryGetValue(qualified, out var extra) || obj.Extra.TryGetValue(h, out extra)))
                         return extra;
                 }
                 return get?.Invoke(r);

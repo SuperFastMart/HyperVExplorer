@@ -120,7 +120,11 @@ public static class RvToolsTables
                     ? rows.Select(r => (object)new RawSheetRow(src, r))
                     : [])
                 .ToList(),
-            ScopeOf = row => (((RawSheetRow)row).Source.Address, null, null),
+            ScopeOf = row =>
+            {
+                var r = (RawSheetRow)row;
+                return (r.Source.Address, r.Values.GetValueOrDefault("Host") as string, r.Values.GetValueOrDefault("Cluster") as string);
+            },
         };
     }
 

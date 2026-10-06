@@ -1,3 +1,5 @@
+using HypervisorExplorer.Collectors.Proxmox;
+using HypervisorExplorer.Collectors.VMware;
 using HypervisorExplorer.Core.Collection;
 using HypervisorExplorer.Core.Model;
 
@@ -8,6 +10,8 @@ public static class CollectorRegistry
 {
     public static IInventoryCollector Create(Platform platform) => platform switch
     {
+        Platform.Proxmox => new ProxmoxCollector(),
+        Platform.VMware => new VMwareCollector(),
         _ => throw new NotSupportedException($"No collector registered for {platform}."),
     };
 
