@@ -27,3 +27,4 @@ publish/
 
 # Claude Code local state (agent worktrees, settings)
 .claude/
+artifacts/
