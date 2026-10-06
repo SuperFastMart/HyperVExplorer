@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>hvexplorer</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HypervisorExplorer.Core\HypervisorExplorer.Core.csproj" />
+    <ProjectReference Include="..\HypervisorExplorer.Collectors\HypervisorExplorer.Collectors.csproj" />
+  </ItemGroup>
+</Project>

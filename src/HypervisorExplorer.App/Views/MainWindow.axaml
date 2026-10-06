@@ -27,8 +27,16 @@
                     <Button Classes="tool" Content="⟳ Refresh" Command="{Binding RefreshAllCommand}"
                             IsEnabled="{Binding HasConnections}" ToolTip.Tip="Re-collect every connected source"/>
                     <Rectangle Width="1" Fill="{DynamicResource PanelBorder}" Margin="6,4"/>
-                    <Button Classes="tool" Content="Open…" Command="{Binding OpenInventoryCommand}"
-                            ToolTip.Tip="Open a saved inventory snapshot (.json)"/>
+                    <DropDownButton Classes="tool" Content="Open">
+                        <DropDownButton.Flyout>
+                            <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                                <MenuItem Header="Open inventory snapshot…" Command="{Binding OpenInventoryCommand}"/>
+                                <Separator/>
+                                <MenuItem Header="Import Hyper-V collection file…" Command="{Binding ImportHyperVFileCommand}"/>
+                                <MenuItem Header="Save Hyper-V collection script (offline hosts)…" Command="{Binding SaveHyperVScriptCommand}"/>
+                            </MenuFlyout>
+                        </DropDownButton.Flyout>
+                    </DropDownButton>
                     <Button Classes="tool" Content="Save…" Command="{Binding SaveInventoryCommand}"
                             ToolTip.Tip="Save the whole inventory to a snapshot file you can reopen later"/>
                     <DropDownButton Classes="tool" Content="Export">

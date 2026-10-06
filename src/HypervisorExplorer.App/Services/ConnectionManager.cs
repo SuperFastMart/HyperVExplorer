@@ -26,7 +26,7 @@ public sealed partial class ConnectionItem : ObservableObject
     }
 
     public ConnectionRequest Request { get; set; }
-    public string Address => Request.Address;
+    public string Address => Request.DisplayName;
     public Platform Platform => Request.Platform;
     public string PlatformLabel => Core.Tables.RvToolsTables.PlatformName(Platform);
 
@@ -90,10 +90,13 @@ public sealed class ConnectionManager
     public ConnectionItem? Find(string address) =>
         Connections.FirstOrDefault(c => string.Equals(c.Address, address, StringComparison.OrdinalIgnoreCase));
 
+    private ConnectionItem? Find(ConnectionRequest request) =>
+        Connections.FirstOrDefault(c => string.Equals(c.Request.DisplayName, request.DisplayName, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Queues a collection. Re-running for an existing address refreshes it.</summary>
     public Task ConnectAsync(ConnectionRequest request)
     {
-        var item = Find(request.Address);
+        var item = Find(request);
         if (item is null)
         {
             item = new ConnectionItem(request);
@@ -139,6 +142,7 @@ public sealed class ConnectionManager
             });
 
             var snapshot = await Task.Run(() => _collectorFactory(request.Platform).CollectAsync(request, progress, ct), ct);
+            snapshot.RekeySource(request.DisplayName);
             _store.Upsert(snapshot);
 
             item.Status = ConnectionStatus.Connected;
@@ -187,7 +191,7 @@ public sealed class ConnectionManager
     {
         item.Cts?.Cancel();
         Connections.Remove(item);
-        _store.Remove(item.Address);
+        _store.Remove(item.Request.DisplayName);
         Log(item.Address, "Disconnected");
     }
 

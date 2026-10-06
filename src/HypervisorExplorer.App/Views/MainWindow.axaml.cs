@@ -65,7 +65,9 @@ public partial class MainWindow : Window, IDialogService
         var sample = table.AllRows.Take(300).ToList();
         foreach (var (index, column) in columns)
         {
-            var maxChars = Math.Max(column.Header.Length, sample.Count == 0 ? 0 : sample.Max(r => r.Text[index].Length));
+            var dataChars = sample.Count == 0 ? 0 : sample.Max(r => r.Text[index].Length);
+            // Headers are bold (wider glyphs) and need room for the sort arrow.
+            var width = Math.Max(column.Header.Length * 8.4 + 40, dataChars * 7.8 + 34);
             var col = new DataGridTextColumn
             {
                 Header = column.Header,
@@ -73,7 +75,7 @@ public partial class MainWindow : Window, IDialogService
                 CustomSortComparer = new GridRowComparer(index),
                 SortMemberPath = $"Text[{index}]",
                 CanUserSort = true,
-                Width = new DataGridLength(Math.Clamp(maxChars * 7.4 + 30, 70, 420)),
+                Width = new DataGridLength(Math.Clamp(width, 70, 440)),
             };
             if (column.Kind == CellKind.Number) col.CellStyleClasses.Add("num");
             Grid.Columns.Add(col);

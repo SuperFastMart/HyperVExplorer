@@ -1,0 +1,39 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Test
+        run: dotnet test tests/HypervisorExplorer.Tests -c Release
+
+      - name: Publish
+        shell: pwsh
+        run: ./build/publish.ps1 -Version "${{ github.ref_type == 'tag' && github.ref_name || '0.0.0-ci' }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HypervisorExplorer-win-x64
+          path: artifacts/publish/*.zip
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/publish/*.zip
+          generate_release_notes: true

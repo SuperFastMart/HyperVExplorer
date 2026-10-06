@@ -1,10 +1,14 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/HypervisorExplorer.App/HypervisorExplorer.App.csproj" />
+    <Project Path="src/HypervisorExplorer.Cli/HypervisorExplorer.Cli.csproj" />
     <Project Path="src/HypervisorExplorer.Collectors/HypervisorExplorer.Collectors.csproj" />
     <Project Path="src/HypervisorExplorer.Core/HypervisorExplorer.Core.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/HypervisorExplorer.Tests/HypervisorExplorer.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/HypervisorExplorer.Screenshots/HypervisorExplorer.Screenshots.csproj" />
   </Folder>
 </Solution>

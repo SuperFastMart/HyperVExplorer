@@ -4,6 +4,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using HypervisorExplorer.App.Services;
+using HypervisorExplorer.Collectors.HyperV;
 using HypervisorExplorer.Core.Collection;
 using HypervisorExplorer.Core.Config;
 using HypervisorExplorer.Core.Export;
@@ -43,7 +44,7 @@ public sealed partial class MainViewModel : ViewModelBase
         Connections.Succeeded += OnConnectionSucceeded;
         Connections.Failed += item =>
         {
-            if (_config.Config.FindHost(item.Address, item.Platform) is { } host)
+            if (_config.Config.FindHost(item.Request.Address, item.Platform) is { } host)
             {
                 host.LastError = item.Message;
                 _config.Save();
@@ -308,7 +309,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private ConnectionRequest RefreshRequest(ConnectionItem item)
     {
         // Prefer freshly stored credentials (the user may have edited them since).
-        if (_config.Config.FindHost(item.Address, item.Platform) is { } saved)
+        if (_config.Config.FindHost(item.Request.Address, item.Platform) is { } saved)
         {
             var stored = _config.BuildRequest(saved);
             if (ConfigStore.HasUsableCredentials(stored)) return stored;
@@ -434,6 +435,38 @@ public sealed partial class MainViewModel : ViewModelBase
         if (path is null) return;
         var snaps = _store.Snapshots;
         await RunExport("inventory snapshot", path, p => InventoryJson.Save(snaps, p));
+    }
+
+    [RelayCommand]
+    private async Task SaveHyperVScript()
+    {
+        if (Dialogs is null) return;
+        var path = await Dialogs.PickSaveFileAsync("Save Hyper-V collection script", "Collect-HyperV.ps1", "ps1", StartDir);
+        if (path is null) return;
+        await File.WriteAllTextAsync(path, HyperVCollector.GetCollectionScript(), new System.Text.UTF8Encoding(true));
+        RememberDir(path);
+        await Dialogs.ShowMessageAsync("Collection script saved",
+            $"Saved to {path}.\n\nFor hosts you can't reach over WinRM, copy the script to the Hyper-V host and run it in an elevated PowerShell:\n\n" +
+            "  .\\Collect-HyperV.ps1 -OutFile hyperv.json\n\nThen use Open → Import Hyper-V collection file… here.");
+    }
+
+    [RelayCommand]
+    private async Task ImportHyperVFile()
+    {
+        if (Dialogs is null) return;
+        var path = await Dialogs.PickOpenFileAsync("Import Hyper-V collection file", ["json"]);
+        if (path is null) return;
+        try
+        {
+            var name = Path.GetFileNameWithoutExtension(path);
+            var request = new ConnectionRequest { Platform = Platform.HyperV, Address = name };
+            var snap = await Task.Run(() => HyperVJsonMapper.MapFile(path, request));
+            Connections.AddImported([snap], Path.GetFileName(path));
+        }
+        catch (Exception ex)
+        {
+            await Dialogs.ShowMessageAsync("Could not import file", ex.Message);
+        }
     }
 
     [RelayCommand]

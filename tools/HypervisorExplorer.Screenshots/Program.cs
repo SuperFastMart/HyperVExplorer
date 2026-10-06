@@ -33,7 +33,7 @@ void Save(Window w, string name)
     Pump();
     var frame = w.CaptureRenderedFrame();
     var path = Path.Combine(outDir, name + ".png");
-    frame?.Save(path, null);
+    frame?.Save(path, (int?)null);
     Console.WriteLine(path);
 }
 

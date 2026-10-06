@@ -408,4 +408,20 @@ public sealed class InventorySnapshot
     public List<HealthItem> Health { get; init; } = [];
     /// <summary>Non-fatal collection warnings (a VM whose config could not be read, etc.).</summary>
     public List<string> Warnings { get; init; } = [];
+
+    /// <summary>
+    /// Renames the source everywhere it is referenced. Used to key sources by "address:port" when a
+    /// non-default port is used, so two endpoints on one address do not overwrite each other.
+    /// </summary>
+    public void RekeySource(string address)
+    {
+        var old = Source.Address;
+        if (string.Equals(old, address, StringComparison.OrdinalIgnoreCase)) return;
+        Source.Address = address;
+        foreach (var c in Clusters) if (c.SourceAddress == old) c.SourceAddress = address;
+        foreach (var h in Hosts) if (h.SourceAddress == old) h.SourceAddress = address;
+        foreach (var v in VirtualMachines) if (v.SourceAddress == old) v.SourceAddress = address;
+        foreach (var d in Datastores) if (d.SourceAddress == old) d.SourceAddress = address;
+        foreach (var i in Health) if (i.SourceAddress == old) i.SourceAddress = address;
+    }
 }

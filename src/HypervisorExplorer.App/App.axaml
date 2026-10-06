@@ -22,6 +22,6 @@
     <Application.Styles>
         <FluentTheme />
         <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
-        <StyleInclude Source="avares://HypervisorExplorer.App/Styles/AppStyles.axaml"/>
+        <StyleInclude Source="avares://HypervisorExplorer/Styles/AppStyles.axaml"/>
     </Application.Styles>
 </Application>
