@@ -102,4 +102,4 @@ Every grid, CSV, XLSX sheet and HTML table comes from the same `TableDefinition`
 
 ## Status
 
-Version 3.0 is a full C# rewrite. The VMware collector has been run against VMware's `vcsim` vSphere simulator. The Proxmox collector has been run against real clusters. The built-in WinRM client used for Hyper-V on macOS has been tested end to end against an independent NTLM implementation (pyspnego) via `tools/FakeWinRm`. Hyper-V collection still needs its first runs against real hosts. Please open an issue with the activity-log output (**View → Show activity log**) if anything looks wrong.
+Version 3.0 is a full C# rewrite. The VMware collector has been run against VMware's `vcsim` vSphere simulator. The Proxmox, ESXi and Hyper-V collectors have all been run against real hosts, including Hyper-V collected from macOS through the built-in WinRM client (which is also tested end to end against an independent NTLM implementation via `tools/FakeWinRm`). Failover Cluster expansion still needs its first run against a real cluster. Please open an issue with the activity-log output (**View → Show activity log**) if anything looks wrong.
