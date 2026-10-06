@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\HypervisorExplorer.Core\HypervisorExplorer.Core.csproj" />
+  </ItemGroup>
+</Project>

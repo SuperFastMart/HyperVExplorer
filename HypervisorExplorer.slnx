@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HypervisorExplorer.Collectors/HypervisorExplorer.Collectors.csproj" />
+    <Project Path="src/HypervisorExplorer.Core/HypervisorExplorer.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HypervisorExplorer.Tests/HypervisorExplorer.Tests.csproj" />
+  </Folder>
+</Solution>
