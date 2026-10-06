@@ -51,7 +51,7 @@ jobs:
         run: dotnet test tests/HypervisorExplorer.Tests -c Release
 
       - name: Package
-        run: ZIP=1 ./build/package-macos.sh "${{ github.ref_type == 'tag' && github.ref_name || '0.0.0-ci' }}" osx-arm64
+        run: ZIP=1 bash ./build/package-macos.sh "${{ github.ref_type == 'tag' && github.ref_name || '0.0.0-ci' }}" osx-arm64
 
       - uses: actions/upload-artifact@v4
         with:
