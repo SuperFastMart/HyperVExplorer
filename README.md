@@ -24,7 +24,7 @@ Inventory for a mixed hypervisor estate. Connect to **Microsoft Hyper-V** (inclu
 |---|---|---|---|
 | **VMware vCenter / ESXi** | vSphere Web Services API on HTTPS 443, with username and password, the same way RVTools works. No SSH. | VMs, hosts, clusters (HA/DRS), datastores, standard and distributed switches, port groups, resource pools, snapshots, guest disks, licences (keys masked) | A read-only role is enough. Point it at vCenter to get the whole estate. |
 | **Proxmox VE** | REST API on HTTPS 8006, with an API token or username and password | QEMU VMs and LXC containers, nodes, cluster and quorum, storage (shared and local), bridges, bonds and VLANs, snapshots, HA, and guest IPs and file systems through the QEMU guest agent | The `PVEAuditor` role on `/`. Connecting to one node collects the whole cluster. |
-| **Microsoft Hyper-V** | WinRM (PowerShell remoting), as the current Windows user or with credentials | VMs, VHDs, NICs and VLANs, checkpoints, integration services, host hardware, virtual switches, volumes. **Failover Cluster:** nodes, quorum, cluster networks, CSVs, VM roles with owner and preferred nodes. Every cluster node is collected automatically. | The app must run on Windows, and the host needs `Enable-PSRemoting`. Hosts you can't reach can use the offline script below. |
+| **Microsoft Hyper-V** | WinRM on port 5985 (encrypted) or 5986 (HTTPS). On Windows it uses PowerShell remoting, as the current user or with credentials. On macOS and Linux a built-in WinRM client signs in with a username and password (NTLM). | VMs, VHDs, NICs and VLANs, checkpoints, integration services, host hardware, virtual switches, volumes. **Failover Cluster:** nodes, quorum, cluster networks, CSVs, VM roles with owner and preferred nodes. Every cluster node is collected automatically. | WinRM enabled on the host (`Enable-PSRemoting`) and an account with local admin rights. Hosts you can't reach can use the offline script below. |
 
 ## Getting started
 
@@ -32,7 +32,7 @@ Inventory for a mixed hypervisor estate. Connect to **Microsoft Hyper-V** (inclu
 2. Run `HypervisorExplorer.exe` and click **+ Connect**, or use **View → Load demo data** to look around first.
 3. Use **Export → RVTools-compatible workbook** to produce the `.xlsx`.
 
-The app also runs on macOS and Linux (build from source) for VMware and Proxmox, and for viewing saved snapshots. Collecting from Hyper-V needs Windows.
+The app also runs natively on macOS (Apple Silicon build in the releases) and Linux, with the same features: VMware, Proxmox and Hyper-V can all be collected from a Mac. On macOS, sign in to Hyper-V with `DOMAIN\user` and a password; integrated Windows sign-in is only available on Windows.
 
 ### Hyper-V hosts you can't reach over WinRM
 
@@ -71,6 +71,7 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 dotnet test tests/HypervisorExplorer.Tests      # unit tests (collectors run against recorded API fixtures)
 dotnet run --project src/HypervisorExplorer.App  # run the desktop app
 pwsh ./build/publish.ps1 -Version v3.0.0         # single-file win-x64 exes + zip in artifacts/publish
+./build/package-macos.sh v3.0.0                  # Hypervisor Explorer.app + hvexplorer for Apple Silicon
 ```
 
 Pushing a `v*` tag runs the GitHub Actions workflow, which tests, publishes and attaches the zip to a release.
@@ -85,6 +86,7 @@ Pushing a `v*` tag runs the GitHub Actions workflow, which tests, publishes and 
 | `src/HypervisorExplorer.Cli` | `hvexplorer` command-line tool |
 | `tests/` | xUnit tests |
 | `tools/HypervisorExplorer.Screenshots` | Renders the UI headlessly with demo data (the images in `docs/`) |
+| `tools/FakeWinRm` | Fake WinRM endpoint (Python + pyspnego) for testing the built-in WinRM client without a Windows host |
 | `legacy/` | The original PowerShell/WPF *Hyper-V Explorer v2* |
 
 ### Adding a column or platform
@@ -94,10 +96,10 @@ Every grid, CSV, XLSX sheet and HTML table comes from the same `TableDefinition`
 ## Security notes
 
 - Saved passwords and token secrets are encrypted for your user account and never written in plain text.
-- Hyper-V credentials reach the PowerShell child process through stdin, never on the command line or in environment variables.
+- Hyper-V credentials reach the PowerShell child process through stdin, never on the command line or in environment variables. On macOS/Linux the built-in WinRM client authenticates with NTLM and encrypts every message (HTTP) or uses TLS (HTTPS); the collection script runs on the host without the password being passed to it.
 - TLS certificate checks are skipped by default for Proxmox and ESXi, because self-signed certificates are the norm (RVTools does the same). Untick **Accept self-signed certificates**, or pass `--strict-tls`, to enforce validation.
 - Exports contain infrastructure details (hostnames, IPs, serial numbers). The `.gitignore` excludes `*.xlsx`, `*.csv` and `RVTools_*` so they don't get committed by accident.
 
 ## Status
 
-Version 3.0 is a full C# rewrite. The VMware collector has been run against VMware's `vcsim` vSphere simulator. The Proxmox and Hyper-V collectors are tested against recorded API and cmdlet output only, and still need their first runs against real clusters. Please open an issue with the activity-log output (**View → Show activity log**) if anything looks wrong.
+Version 3.0 is a full C# rewrite. The VMware collector has been run against VMware's `vcsim` vSphere simulator. The Proxmox collector has been run against real clusters. The built-in WinRM client used for Hyper-V on macOS has been tested end to end against an independent NTLM implementation (pyspnego) via `tools/FakeWinRm`. Hyper-V collection still needs its first runs against real hosts. Please open an issue with the activity-log output (**View → Show activity log**) if anything looks wrong.

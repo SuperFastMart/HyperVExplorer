@@ -1,5 +1,6 @@
 using System.Net.Sockets;
 using System.Text.Json;
+using HypervisorExplorer.Collectors.HyperV.WinRm;
 using HypervisorExplorer.Core.Collection;
 using HypervisorExplorer.Core.Model;
 
@@ -16,12 +17,21 @@ public sealed class HyperVCollector : IInventoryCollector
 {
     private readonly IPowerShellRunner _runner;
     private readonly TcpProbe _probe;
+    private readonly NativeHyperVCollection _native;
 
-    public HyperVCollector(IPowerShellRunner? runner = null, TcpProbe? tcpProbe = null)
+    public HyperVCollector(IPowerShellRunner? runner = null, TcpProbe? tcpProbe = null, NativeHyperVCollection? native = null)
     {
         _runner = runner ?? new ProcessPowerShellRunner();
         _probe = tcpProbe ?? DefaultTcpProbe;
+        _native = native ?? new NativeHyperVCollection();
     }
+
+    /// <summary>
+    /// True when collection talks WinRM directly (macOS/Linux, or HVE_HYPERV_TRANSPORT=winrm on Windows)
+    /// instead of going through local PowerShell remoting.
+    /// </summary>
+    public bool UsesNativeWinRm =>
+        !_runner.IsSupported || string.Equals(Environment.GetEnvironmentVariable("HVE_HYPERV_TRANSPORT"), "winrm", StringComparison.OrdinalIgnoreCase);
 
     public Platform Platform => Platform.HyperV;
 
@@ -41,9 +51,8 @@ public sealed class HyperVCollector : IInventoryCollector
         if (address.Length == 0)
             throw new CollectionException(CollectionFailure.Other, "No host address was given.");
 
-        if (!_runner.IsSupported)
-            throw new CollectionException(CollectionFailure.Other,
-                "Hyper-V collection requires Windows (it uses PowerShell remoting).", HyperVErrorMapper.NotWindowsHint);
+        if (UsesNativeWinRm)
+            return await CollectNativeAsync(request, address, progress, cancellationToken).ConfigureAwait(false);
 
         var local = IsLocalAddress(address);
         var useCurrentUser = request.CredentialKind == CredentialKind.CurrentUser || string.IsNullOrEmpty(request.Username);
@@ -104,6 +113,70 @@ public sealed class HyperVCollector : IInventoryCollector
         progress?.Report("Processing collected data...");
         return ParseEnvelope(result, request);
     }
+
+    private async Task<InventorySnapshot> CollectNativeAsync(ConnectionRequest request, string address, IProgress<string>? progress, CancellationToken ct)
+    {
+        if (request.CredentialKind == CredentialKind.CurrentUser || string.IsNullOrEmpty(request.Username))
+            throw new CollectionException(CollectionFailure.AuthenticationFailed,
+                "A username and password are needed to collect Hyper-V from this computer.",
+                NativeAuthHint);
+
+        var port = request.Port ?? (request.UseSsl ? 5986 : 5985);
+        progress?.Report($"Checking WinRM port {port} on {address}...");
+        string? probeError;
+        try
+        {
+            probeError = await _probe(address, port, TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw new CollectionException(CollectionFailure.Cancelled, "Collection cancelled.");
+        }
+        if (probeError is not null)
+            throw new CollectionException(CollectionFailure.Unreachable,
+                $"WinRM port (TCP {port}) is not reachable on '{address}': {probeError}", HyperVErrorMapper.EnableRemotingHint);
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(Timeout);
+        string json;
+        try
+        {
+            json = await _native.CollectAsync(request, address, port, progress, NodeTimeout, timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw new CollectionException(CollectionFailure.Cancelled, "Collection cancelled.");
+        }
+        catch (OperationCanceledException)
+        {
+            throw new CollectionException(CollectionFailure.Other,
+                $"Hyper-V collection from '{address}' timed out after {Timeout.TotalMinutes:0} minutes.",
+                "Very large hosts or unresponsive storage paths can stall Get-VHD. Try running Collect-HyperV.ps1 on the host and importing the JSON.");
+        }
+        catch (WinRmException ex)
+        {
+            throw ex.Kind switch
+            {
+                WinRmErrorKind.Unreachable => new CollectionException(CollectionFailure.Unreachable, ex.Message, HyperVErrorMapper.EnableRemotingHint, ex),
+                WinRmErrorKind.AuthenticationFailed => new CollectionException(CollectionFailure.AuthenticationFailed, ex.Message, NativeAuthHint, ex),
+                WinRmErrorKind.AccessDenied => new CollectionException(CollectionFailure.PermissionDenied, ex.Message, HyperVErrorMapper.AccessDeniedHint, ex),
+                WinRmErrorKind.Certificate => new CollectionException(CollectionFailure.Certificate, ex.Message, HyperVErrorMapper.CertificateHint, ex),
+                _ => new CollectionException(CollectionFailure.Protocol, ex.Message, null, ex),
+            };
+        }
+        catch (RemoteScriptException ex)
+        {
+            throw HyperVErrorMapper.FromEnvelope("collect", ex.Message, ex.Category, request);
+        }
+
+        progress?.Report("Processing collected data...");
+        using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 256 });
+        return HyperVJsonMapper.Map(doc.RootElement, request);
+    }
+
+    internal const string NativeAuthHint =
+        "Use an account that is a local administrator on the host, as DOMAIN\\user or user@domain.com " +
+        "(a local account works too: HOSTNAME\\administrator). NTLM authentication must be allowed (the Windows default).";
 
     /// <summary>Extracts the envelope from PowerShell output and maps it (or the failure) — exposed for tests.</summary>
     public static InventorySnapshot ParseEnvelope(PowerShellResult result, ConnectionRequest request)

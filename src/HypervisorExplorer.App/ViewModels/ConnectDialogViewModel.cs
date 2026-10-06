@@ -87,6 +87,9 @@ public sealed partial class ConnectDialogViewModel : ObservableObject
         (Platform.HyperV, CredentialKind.CurrentUser) =>
             "Uses your Windows sign-in (Kerberos). Connect by hostname, not IP. Requires WinRM on the host (Enable-PSRemoting). " +
             "Failover Cluster nodes are discovered automatically.",
+        (Platform.HyperV, _) when !OperatingSystem.IsWindows() =>
+            "Connects over WinRM (port 5985, encrypted) with an account that is a local administrator on the host, " +
+            "e.g. DOMAIN\\user. Hostnames or IPs both work. Failover Cluster nodes are discovered and collected automatically.",
         (Platform.HyperV, _) =>
             "Requires WinRM on the host (Enable-PSRemoting). IP addresses must be in your WinRM TrustedHosts list. " +
             "Failover Cluster nodes are discovered automatically.",
@@ -136,7 +139,9 @@ public sealed partial class ConnectDialogViewModel : ObservableObject
         switch (SelectedPlatform.Platform)
         {
             case Platform.HyperV:
-                CredentialOptions.Add(new CredentialOption(CredentialKind.CurrentUser, "Current Windows user"));
+                // Integrated (Kerberos) sign-in needs Windows; elsewhere the built-in WinRM client uses NTLM.
+                if (OperatingSystem.IsWindows())
+                    CredentialOptions.Add(new CredentialOption(CredentialKind.CurrentUser, "Current Windows user"));
                 CredentialOptions.Add(new CredentialOption(CredentialKind.UsernamePassword, "Username and password"));
                 break;
             case Platform.Proxmox:

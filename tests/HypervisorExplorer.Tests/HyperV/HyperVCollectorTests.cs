@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using HypervisorExplorer.Collectors.HyperV;
+using HypervisorExplorer.Collectors.HyperV.WinRm;
 using HypervisorExplorer.Core.Collection;
 using HypervisorExplorer.Core.Model;
 
@@ -163,14 +164,30 @@ public class HyperVCollectorTests
     }
 
     [Fact]
-    public async Task NonWindows_ThrowsWithImportHint()
+    public async Task NonWindows_without_credentials_asks_for_username_and_password()
     {
         var runner = new FakeRunner((_, _, _) => throw new InvalidOperationException("should not run"), supported: false);
         var ex = await Assert.ThrowsAsync<CollectionException>(() =>
-            new HyperVCollector(runner, PortOpen).CollectAsync(Req(), null, CancellationToken.None));
-        Assert.Equal(CollectionFailure.Other, ex.Kind);
-        Assert.Contains("requires Windows", ex.Message);
-        Assert.Contains("Collect-HyperV.ps1", ex.Hint);
+            new HyperVCollector(runner, PortOpen).CollectAsync(Req(kind: CredentialKind.CurrentUser), null, CancellationToken.None));
+        Assert.Equal(CollectionFailure.AuthenticationFailed, ex.Kind);
+        Assert.Contains("username and password", ex.Message);
+    }
+
+    [Fact]
+    public async Task NonWindows_uses_builtin_winrm_and_maps_its_errors()
+    {
+        var runner = new FakeRunner((_, _, _) => throw new InvalidOperationException("should not run"), supported: false);
+        string? openedHost = null;
+        var native = new NativeHyperVCollection((host, _, _, _, _, _) =>
+        {
+            openedHost = host;
+            throw new WinRmException(WinRmErrorKind.AuthenticationFailed, "The user name or password was rejected.");
+        });
+        var ex = await Assert.ThrowsAsync<CollectionException>(() =>
+            new HyperVCollector(runner, PortOpen, native).CollectAsync(Req(), null, CancellationToken.None));
+        Assert.Equal("hv01.contoso.local", openedHost);
+        Assert.Equal(CollectionFailure.AuthenticationFailed, ex.Kind);
+        Assert.Contains("local administrator", ex.Hint);
     }
 
     [Fact]
