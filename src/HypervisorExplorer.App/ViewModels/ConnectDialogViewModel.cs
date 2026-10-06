@@ -66,7 +66,9 @@ public sealed partial class ConnectDialogViewModel : ObservableObject
     public string UsernameLabel => SelectedCredential?.Kind == CredentialKind.ApiToken ? "Token ID" : "Username";
     public string SecretLabel => SelectedCredential?.Kind == CredentialKind.ApiToken ? "Token secret" : "Password";
 
-    public string UsernameWatermark => (SelectedPlatform.Platform, SelectedCredential?.Kind) switch
+    public string UsernameWatermark => InheritsFromGroup
+        ? $"leave blank to use the '{SelectedGroup.Name}' group's credentials"
+        : (SelectedPlatform.Platform, SelectedCredential?.Kind) switch
     {
         (Platform.Proxmox, CredentialKind.ApiToken) => "user@realm!tokenname  e.g. root@pam!inventory",
         (Platform.Proxmox, _) => "root  (or user@pve / user@domain)",
@@ -113,7 +115,11 @@ public sealed partial class ConnectDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(Hint));
     }
 
-    partial void OnSelectedGroupChanged(GroupOption value) => OnPropertyChanged(nameof(InheritsFromGroup));
+    partial void OnSelectedGroupChanged(GroupOption value)
+    {
+        OnPropertyChanged(nameof(InheritsFromGroup));
+        OnPropertyChanged(nameof(UsernameWatermark));
+    }
 
     partial void OnUseSslChanged(bool value) => OnPropertyChanged(nameof(PortPlaceholder));
 
