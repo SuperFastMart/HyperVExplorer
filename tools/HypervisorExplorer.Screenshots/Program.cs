@@ -60,6 +60,15 @@ vm.SelectedTable = vm.VisibleTables.First(t => t.Name == "vHost");
 vm.ShowActivity = true;
 Save(window, "05-vhost-activity");
 
+// Update banner: only rendered when GitHub has a release newer than this build (e.g. build with -p:InformationalVersion=3.0.0).
+var update = HypervisorExplorer.App.Services.UpdateService.CheckAsync(CancellationToken.None).GetAwaiter().GetResult(); // stay on the UI thread
+Console.WriteLine($"This build: {HypervisorExplorer.Core.AppInfo.Version}; newer release: {update?.Version ?? "none"}");
+if (update is not null)
+{
+    vm.AvailableUpdate = update;
+    Save(window, "10-update-available");
+}
+
 vm.SourcesExpanded = false;
 Save(window, "09-sources-collapsed");
 vm.SourcesExpanded = true;
