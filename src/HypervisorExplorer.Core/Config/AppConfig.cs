@@ -173,7 +173,12 @@ public sealed class ConfigStore
     public static bool HasUsableCredentials(ConnectionRequest r) =>
         r.CredentialKind == CredentialKind.CurrentUser || (!string.IsNullOrEmpty(r.Username) && !string.IsNullOrEmpty(r.Secret));
 
-    public SavedHost Remember(ConnectionRequest request, bool saveSecret)
+    /// <summary>
+    /// Records a successful connection. Credentials identical to the host's group are not duplicated onto the host
+    /// (so rotating the group password takes effect). A stored secret is kept only when <paramref name="saveSecret"/>
+    /// is set and still belongs to the same account.
+    /// </summary>
+    public SavedHost Remember(ConnectionRequest request, bool saveSecret, string? groupId = null)
     {
         lock (_gate)
         {
@@ -183,20 +188,33 @@ public sealed class ConfigStore
                 host = new SavedHost { Address = request.Address, Platform = request.Platform };
                 Config.Hosts.Add(host);
             }
+            if (groupId is not null) host.GroupId = groupId;
             host.Port = request.Port;
             host.IgnoreCertificateErrors = request.IgnoreCertificateErrors;
             host.UseSsl = request.UseSsl;
             host.LastConnected = DateTimeOffset.Now;
             host.LastError = null;
+
             var group = Config.GroupOf(host);
             var sameAsGroup = group is not null && group.CredentialKind == request.CredentialKind
-                              && string.Equals(group.Username, request.Username, StringComparison.OrdinalIgnoreCase);
-            if (!sameAsGroup)
+                && (request.CredentialKind == CredentialKind.CurrentUser
+                    || (string.Equals(group.Username, request.Username, StringComparison.OrdinalIgnoreCase)
+                        && group.ProtectedSecret is not null && Protector.Unprotect(group.ProtectedSecret) == request.Secret));
+            if (sameAsGroup)
             {
-                host.CredentialKind = request.CredentialKind;
-                host.Username = request.Username;
-                if (saveSecret) SetSecret(host, request.Secret);
+                host.CredentialKind = null;
+                host.Username = null;
+                host.ProtectedSecret = null;
+                return host;
             }
+
+            var accountChanged = host.CredentialKind != request.CredentialKind
+                || !string.Equals(host.Username, request.Username, StringComparison.OrdinalIgnoreCase);
+            host.CredentialKind = request.CredentialKind;
+            host.Username = request.Username;
+            if (!saveSecret || request.CredentialKind == CredentialKind.CurrentUser) host.ProtectedSecret = null;
+            else if (request.Secret is not null) SetSecret(host, request.Secret);
+            else if (accountChanged) host.ProtectedSecret = null;
             return host;
         }
     }

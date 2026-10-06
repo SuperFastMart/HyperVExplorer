@@ -423,5 +423,56 @@ public sealed class InventorySnapshot
         foreach (var v in VirtualMachines) if (v.SourceAddress == old) v.SourceAddress = address;
         foreach (var d in Datastores) if (d.SourceAddress == old) d.SourceAddress = address;
         foreach (var i in Health) if (i.SourceAddress == old) i.SourceAddress = address;
+
+        // Collector-supplied Extra values (e.g. vSphere "VI SDK Server") and raw sheet rows.
+        foreach (var obj in AllObjects())
+        {
+            foreach (var key in obj.Extra.Keys.ToList())
+            {
+                switch (obj.Extra[key])
+                {
+                    case string str when string.Equals(str, old, StringComparison.OrdinalIgnoreCase):
+                        obj.Extra[key] = address;
+                        break;
+                    case IEnumerable<Dictionary<string, object?>> rows:
+                        foreach (var row in rows)
+                        foreach (var k in row.Keys.ToList())
+                            if (row[k] is string v && string.Equals(v, old, StringComparison.OrdinalIgnoreCase)) row[k] = address;
+                        break;
+                }
+            }
+        }
+    }
+
+    /// <summary>Every inventory object in the snapshot (for bulk fix-ups such as rekeying or normalising Extra).</summary>
+    public IEnumerable<InventoryObject> AllObjects()
+    {
+        yield return Source;
+        foreach (var c in Clusters)
+        {
+            yield return c;
+            foreach (var n in c.Nodes) yield return n;
+            foreach (var n in c.Networks) yield return n;
+        }
+        foreach (var h in Hosts)
+        {
+            yield return h;
+            foreach (var o in h.Nics) yield return o;
+            foreach (var o in h.Switches) yield return o;
+            foreach (var o in h.PortGroups) yield return o;
+            foreach (var o in h.IpInterfaces) yield return o;
+            foreach (var o in h.StorageAdapters) yield return o;
+        }
+        foreach (var v in VirtualMachines)
+        {
+            yield return v;
+            foreach (var o in v.Disks) yield return o;
+            foreach (var o in v.Nics) yield return o;
+            foreach (var o in v.CdDrives) yield return o;
+            foreach (var o in v.UsbDevices) yield return o;
+            foreach (var o in v.Snapshots) yield return o;
+            foreach (var o in v.Partitions) yield return o;
+        }
+        foreach (var d in Datastores) yield return d;
     }
 }

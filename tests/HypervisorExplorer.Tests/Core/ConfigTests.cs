@@ -65,10 +65,41 @@ public class ConfigTests : IDisposable
         var store = new ConfigStore(_dir);
         var req = new ConnectionRequest { Platform = Platform.Proxmox, Address = "pve1", CredentialKind = CredentialKind.ApiToken, Username = "root@pam!ro", Secret = "uuid" };
         store.Remember(req, saveSecret: true);
-        store.Remember(req with { Port = 8007 }, saveSecret: false);
+        store.Remember(req with { Port = 8007 }, saveSecret: true);
         var host = Assert.Single(store.Config.Hosts);
         Assert.Equal(8007, host.Port);
         Assert.Equal("uuid", store.BuildRequest(host).Secret);
+    }
+
+    [Fact]
+    public void Remember_without_saving_clears_stored_secret_and_never_pairs_new_user_with_old_password()
+    {
+        var store = new ConfigStore(_dir);
+        var alice = new ConnectionRequest { Platform = Platform.VMware, Address = "vc", Username = "alice", Secret = "pwA" };
+        store.Remember(alice, saveSecret: true);
+        store.Remember(alice with { Username = "bob", Secret = "pwB" }, saveSecret: false);
+
+        var req = store.BuildRequest(Assert.Single(store.Config.Hosts));
+        Assert.Equal("bob", req.Username);
+        Assert.Null(req.Secret);
+        Assert.False(ConfigStore.HasUsableCredentials(req));
+    }
+
+    [Fact]
+    public void Remember_with_group_credentials_does_not_copy_them_onto_the_host()
+    {
+        var store = new ConfigStore(_dir);
+        var group = new HostGroup { Name = "Site", CredentialKind = CredentialKind.UsernamePassword, Username = "svc" };
+        store.SetSecret(group, "old");
+        store.Config.Groups.Add(group);
+
+        var req = new ConnectionRequest { Platform = Platform.Proxmox, Address = "pve1", Username = "svc", Secret = "old" };
+        var host = store.Remember(req, saveSecret: true, groupId: group.Id);
+        Assert.Null(host.CredentialKind);
+        Assert.Null(host.ProtectedSecret);
+
+        store.SetSecret(group, "rotated");
+        Assert.Equal("rotated", store.BuildRequest(host).Secret);
     }
 
     [Fact]

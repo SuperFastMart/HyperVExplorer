@@ -42,22 +42,18 @@ public sealed partial class TreeNodeViewModel : ObservableObject
     public bool Matches(GridRow row)
     {
         var (src, host, cluster) = row.Scope;
-        switch (Kind)
-        {
-            case TreeNodeKind.All:
-                return true;
-            case TreeNodeKind.Platform:
-                return Sources.Contains(src);
-            case TreeNodeKind.Datacenter:
-            case TreeNodeKind.Cluster:
-                if (!Sources.Contains(src)) return false;
-                if (host is not null) return Hosts.Contains((src, host));
-                return cluster is null ? Kind == TreeNodeKind.Datacenter : Clusters.Contains(cluster);
-            case TreeNodeKind.Host:
-                return host is not null && Hosts.Contains((src, host));
-            default:
-                return true;
-        }
+        if (string.IsNullOrEmpty(host)) host = null;
+        if (string.IsNullOrEmpty(cluster)) cluster = null;
+
+        if (Kind == TreeNodeKind.All) return true;
+        // Rows not tied to any source (export metadata) apply everywhere.
+        if (string.IsNullOrEmpty(src)) return true;
+        if (!Sources.Contains(src)) return false;
+        if (Kind == TreeNodeKind.Platform) return true;
+        if (host is not null) return Hosts.Contains((src, host));
+        if (cluster is not null) return Clusters.Contains(cluster);
+        // Source-level rows (vSource, vHealth for the source, licences) belong to every node under that source.
+        return true;
     }
 
     public static TreeNodeViewModel Build(Inventory inv)
@@ -115,6 +111,9 @@ public sealed partial class TreeNodeViewModel : ObservableObject
                         {
                             Kind = TreeNodeKind.Host, Key = $"h:{h.SourceAddress}:{h.Name}", Title = h.Name,
                             Subtitle = $"{VmCount(h)} VMs", Sources = { h.SourceAddress }, Hosts = { (h.SourceAddress, h.Name) },
+                            Clusters = h.Cluster is null
+                                ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                                : new HashSet<string>(StringComparer.OrdinalIgnoreCase) { h.Cluster },
                         });
                     }
                 }

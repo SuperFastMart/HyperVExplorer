@@ -42,7 +42,7 @@ public sealed class TableColumn
     public static string Format(object? value) => value switch
     {
         null => "",
-        DateTime dt => dt.TimeOfDay == TimeSpan.Zero ? dt.ToString("yyyy-MM-dd") : dt.ToString("yyyy-MM-dd HH:mm:ss"),
+        DateTime dt => dt.ToString(dt.TimeOfDay == TimeSpan.Zero ? "yyyy-MM-dd" : "yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture),
         double d => d.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
         float f => f.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
         decimal m => m.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),

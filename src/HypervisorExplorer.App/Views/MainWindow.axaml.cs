@@ -179,7 +179,15 @@ public partial class MainWindow : Window, IDialogService
 
     public async Task SetClipboardTextAsync(string text)
     {
-        if (Clipboard is { } clipboard) await clipboard.SetTextAsync(text);
+        try
+        {
+            if (Clipboard is { } clipboard) await clipboard.SetTextAsync(text);
+        }
+        catch (Exception ex)
+        {
+            // Clipboard can be locked by another process on Windows; never let that crash the app.
+            _vm?.Connections.Log("Clipboard", "Copy failed: " + ex.Message, isError: true);
+        }
     }
 
     /// <summary>The window dialogs should be owned by (a nested dialog may be open).</summary>

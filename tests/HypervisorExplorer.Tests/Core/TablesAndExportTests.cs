@@ -169,6 +169,49 @@ public class TablesAndExportTests
         Assert.Throws<InvalidDataException>(() => InventoryJson.Deserialize("{\"format\":\"other\",\"snapshots\":[]}"));
 
     [Fact]
+    public void Json_rejects_files_without_format_marker() =>
+        // e.g. a Hyper-V collection file: must not load as an empty inventory
+        Assert.Throws<InvalidDataException>(() => InventoryJson.Deserialize("{\"schemaVersion\":1,\"host\":{}}"));
+
+    [Fact]
+    public void Json_round_trip_keeps_extra_case_insensitive()
+    {
+        var snaps = SampleInventory.Create();
+        snaps[2].VirtualMachines[0].Extra["Config status"] = "yellow";
+        var back = InventoryJson.Deserialize(InventoryJson.Serialize(snaps));
+        var vm = back[2].VirtualMachines.First(v => v.Name == snaps[2].VirtualMachines[0].Name);
+        Assert.True(vm.Extra.ContainsKey("config STATUS"));
+    }
+
+    [Fact]
+    public void Dates_format_invariantly_regardless_of_culture()
+    {
+        var previous = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("th-TH");
+            Assert.Equal("2024-05-01 10:30:00", TableColumn.Format(new DateTime(2024, 5, 1, 10, 30, 0)));
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
+    }
+
+    [Fact]
+    public void Rekey_updates_all_references_including_extra_values()
+    {
+        var snap = SampleInventory.Create()[2];
+        var old = snap.Source.Address;
+        snap.VirtualMachines[0].Extra["VI SDK Server"] = old;
+        snap.RekeySource(old + ":8443");
+        Assert.All(snap.VirtualMachines, v => Assert.Equal(old + ":8443", v.SourceAddress));
+        Assert.Equal(old + ":8443", snap.VirtualMachines[0].Extra["VI SDK Server"]);
+        var lic = (List<Dictionary<string, object?>>)snap.Source.Extra["__sheet:vLicense"]!;
+        Assert.Equal(old + ":8443", lic[0]["VI SDK Server"]);
+    }
+
+    [Fact]
     public void Html_report_renders_and_encodes()
     {
         var snaps = SampleInventory.Create();

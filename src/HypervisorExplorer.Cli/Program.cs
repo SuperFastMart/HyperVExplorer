@@ -63,6 +63,11 @@ internal static class Cli
         {
             return Fail(ex.Message);
         }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException or CollectionException)
+        {
+            Console.Error.WriteLine("error: " + ex.Message);
+            return 3;
+        }
     }
 
     private static int Fail(string message)
@@ -110,13 +115,19 @@ internal static class Cli
                     var name = Next();
                     secret = Environment.GetEnvironmentVariable(name) ?? throw new ArgumentException($"Environment variable {name} is not set.");
                     break;
-                case "--password-file": secret = File.ReadLines(Next()).FirstOrDefault()?.TrimEnd() ?? ""; break;
+                case "--password-file":
+                    var file = Next();
+                    if (!File.Exists(file)) throw new ArgumentException($"Password file '{file}' not found.");
+                    secret = File.ReadLines(file).FirstOrDefault()?.TrimEnd() ?? "";
+                    break;
                 case "--token": token = true; break;
                 case "--current-user": currentUser = true; break;
                 case "--group": group = Next(); break;
                 case "--strict-tls": strictTls = true; break;
                 case "-o" or "--out": output = Next(); break;
-                case "--parallel": parallel = int.Parse(Next()); break;
+                case "--parallel":
+                    if (!int.TryParse(Next(), out parallel) || parallel < 1) throw new ArgumentException("--parallel needs a positive number.");
+                    break;
                 case "--saved":
                     config ??= new ConfigStore();
                     requests.AddRange(config.Config.Hosts.Select(config.BuildRequest));
@@ -145,9 +156,11 @@ internal static class Cli
 
         await Task.WhenAll(requests.Select(async request =>
         {
-            await gate.WaitAsync(cts.Token);
+            var acquired = false;
             try
             {
+                await gate.WaitAsync(cts.Token);
+                acquired = true;
                 var progress = new Progress<string>(m => Log(request.Address, m));
                 var snap = await CollectorRegistry.Create(request.Platform).CollectAsync(request, progress, cts.Token);
                 snap.RekeySource(request.DisplayName);
@@ -155,19 +168,24 @@ internal static class Cli
                 foreach (var w in snap.Warnings) Log(request.Address, "warning: " + w);
                 Log(request.Address, $"OK: {snap.Hosts.Count} host(s), {snap.VirtualMachines.Count} VM(s)");
             }
-            catch (CollectionException ex)
+            catch (CollectionException ex) when (ex.Kind != CollectionFailure.Cancelled)
             {
                 Interlocked.Increment(ref failures);
                 Log(request.Address, $"FAILED ({ex.Kind}): {ex.Message}" + (ex.Hint is null ? "" : $"\n    hint: {ex.Hint}"));
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException)
+            {
+                Interlocked.Increment(ref failures);
+                Log(request.Address, "cancelled");
+            }
+            catch (Exception ex)
             {
                 Interlocked.Increment(ref failures);
                 Log(request.Address, "FAILED: " + ex.Message);
             }
             finally
             {
-                gate.Release();
+                if (acquired) gate.Release();
             }
         }));
 

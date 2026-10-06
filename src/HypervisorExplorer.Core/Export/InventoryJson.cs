@@ -31,22 +31,26 @@ public static partial class InventoryJson
 
     private sealed class Document
     {
-        public string Format { get; set; } = InventoryJson.Format;
-        public int Version { get; set; } = InventoryJson.Version;
+        // No defaults: a file missing these fields must fail validation, not load as an empty inventory.
+        public string? Format { get; set; }
+        public int Version { get; set; }
         public DateTimeOffset ExportedAt { get; set; } = DateTimeOffset.Now;
         public string? Application { get; set; } = "Hypervisor Explorer";
         public List<InventorySnapshot> Snapshots { get; set; } = [];
     }
 
+    private static Document NewDocument(IEnumerable<InventorySnapshot> snapshots) =>
+        new() { Format = Format, Version = Version, Snapshots = snapshots.ToList() };
+
     public static void Save(IEnumerable<InventorySnapshot> snapshots, string path)
     {
-        var doc = new Document { Snapshots = snapshots.ToList() };
+        var doc = NewDocument(snapshots);
         using var fs = new FileStream(path, FileMode.Create, FileAccess.Write);
         JsonSerializer.Serialize(fs, doc, Options);
     }
 
     public static string Serialize(IEnumerable<InventorySnapshot> snapshots) =>
-        JsonSerializer.Serialize(new Document { Snapshots = snapshots.ToList() }, Options);
+        JsonSerializer.Serialize(NewDocument(snapshots), Options);
 
     public static List<InventorySnapshot> Load(string path)
     {
@@ -62,6 +66,13 @@ public static partial class InventoryJson
             throw new InvalidDataException($"Not a Hypervisor Explorer inventory file (format '{doc.Format}').");
         if (doc.Version > Version)
             throw new InvalidDataException($"Inventory file version {doc.Version} is newer than this app supports ({Version}).");
+        foreach (var snap in doc.Snapshots)
+        foreach (var obj in snap.AllObjects())
+        {
+            // The serializer recreates dictionaries with the default (case-sensitive) comparer.
+            if (obj.Extra.Comparer != StringComparer.OrdinalIgnoreCase)
+                obj.Extra = new Dictionary<string, object?>(obj.Extra, StringComparer.OrdinalIgnoreCase);
+        }
         return doc.Snapshots;
     }
 

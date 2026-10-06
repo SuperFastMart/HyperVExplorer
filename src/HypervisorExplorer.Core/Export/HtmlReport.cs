@@ -12,6 +12,21 @@ public static class HtmlReport
 
     public static string Render(Inventory inv)
     {
+        // The report is a shareable artefact: use invariant number/date formatting regardless of the PC's locale.
+        var previous = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+        try
+        {
+            return RenderCore(inv);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
+    }
+
+    private static string RenderCore(Inventory inv)
+    {
         var vms = inv.VirtualMachines;
         var on = vms.Count(v => v.PowerState == PowerState.PoweredOn);
         var sb = new StringBuilder();

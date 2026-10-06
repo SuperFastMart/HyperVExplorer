@@ -56,7 +56,7 @@ public sealed class ConnectionManager
 {
     private readonly InventoryStore _store;
     private readonly Func<Platform, IInventoryCollector> _collectorFactory;
-    private SemaphoreSlim _gate;
+    private readonly SemaphoreSlim _gate;
 
     public ConnectionManager(InventoryStore store, int maxParallel = 4, Func<Platform, IInventoryCollector>? collectorFactory = null)
     {
@@ -73,8 +73,6 @@ public sealed class ConnectionManager
     public event Action<ConnectionItem>? Failed;
 
     public bool AnyBusy => Connections.Any(c => c.IsBusy);
-
-    public void SetParallelism(int max) => _gate = new SemaphoreSlim(Math.Max(1, max));
 
     public void Log(string source, string message, bool isError = false)
     {
@@ -93,7 +91,10 @@ public sealed class ConnectionManager
     private ConnectionItem? Find(ConnectionRequest request) =>
         Connections.FirstOrDefault(c => string.Equals(c.Request.DisplayName, request.DisplayName, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Queues a collection. Re-running for an existing address refreshes it.</summary>
+    /// <summary>
+    /// Queues a collection. Re-running for an existing address refreshes it. The returned task completes when the
+    /// collection finishes and never throws, so callers may fire and forget.
+    /// </summary>
     public Task ConnectAsync(ConnectionRequest request)
     {
         var item = Find(request);
@@ -143,6 +144,9 @@ public sealed class ConnectionManager
 
             var snapshot = await Task.Run(() => _collectorFactory(request.Platform).CollectAsync(request, progress, ct), ct);
             snapshot.RekeySource(request.DisplayName);
+            // The source may have been disconnected/cleared while the collector was finishing.
+            ct.ThrowIfCancellationRequested();
+            if (!Connections.Contains(item)) return;
             _store.Upsert(snapshot);
 
             item.Status = ConnectionStatus.Connected;

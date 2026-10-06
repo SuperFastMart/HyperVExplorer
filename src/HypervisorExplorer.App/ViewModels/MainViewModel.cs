@@ -235,10 +235,11 @@ public sealed partial class MainViewModel : ViewModelBase
         if (Dialogs is null) return;
         var vm = new ConnectDialogViewModel(_config.Config.Groups);
         if (await Dialogs.ShowConnectDialogAsync(vm) is not { } result) return;
-        await StartConnection(result.Request, result);
+        StartConnection(result.Request, result);
     }
 
-    private async Task StartConnection(ConnectionRequest request, ConnectDialogResult? fromDialog)
+    /// <summary>Starts a collection without awaiting it, so commands stay enabled and sources run in parallel.</summary>
+    private void StartConnection(ConnectionRequest request, ConnectDialogResult? fromDialog)
     {
         if (request.CredentialKind != CredentialKind.CurrentUser && (request.Username is null || request.Secret is null)
             && fromDialog?.GroupId is { } gid && _config.Config.Groups.FirstOrDefault(g => g.Id == gid) is { } group)
@@ -252,19 +253,15 @@ public sealed partial class MainViewModel : ViewModelBase
             };
         }
         if (fromDialog is not null) _pendingSaves[request.Address] = fromDialog;
-        await Connections.ConnectAsync(request);
+        _ = Connections.ConnectAsync(request);
     }
 
     private void OnConnectionSucceeded(ConnectionRequest request)
     {
         _pendingSaves.Remove(request.Address, out var dialog);
         var existing = _config.Config.FindHost(request.Address, request.Platform);
-        var host = _config.Remember(request, dialog?.SaveCredentials ?? existing?.ProtectedSecret is not null);
-        if (dialog is not null)
-        {
-            if (dialog.GroupId is not null) host.GroupId = dialog.GroupId;
-            if (dialog.DisplayName is not null) host.DisplayName = dialog.DisplayName;
-        }
+        var host = _config.Remember(request, dialog?.SaveCredentials ?? existing?.ProtectedSecret is not null, dialog?.GroupId);
+        if (dialog?.DisplayName is not null) host.DisplayName = dialog.DisplayName;
         _config.Save();
     }
 
@@ -284,7 +281,7 @@ public sealed partial class MainViewModel : ViewModelBase
                 if (dialog is null) continue;
                 request = dialog.Request;
             }
-            _ = StartConnection(request, dialog);
+            StartConnection(request, dialog);
         }
     }
 
@@ -296,15 +293,19 @@ public sealed partial class MainViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private async Task RefreshAll()
+    private void RefreshAll()
     {
-        foreach (var item in Connections.Connections.Where(c => c.Status is ConnectionStatus.Connected or ConnectionStatus.Failed).ToList())
-            await Connections.ConnectAsync(RefreshRequest(item));
+        // Not awaited: the connection manager runs these in parallel up to its limit.
+        foreach (var item in Connections.Connections.Where(c => c.Status is ConnectionStatus.Connected or ConnectionStatus.Failed or ConnectionStatus.Cancelled).ToList())
+            _ = Connections.ConnectAsync(RefreshRequest(item));
     }
 
     [RelayCommand]
-    private Task Refresh(ConnectionItem? item) =>
-        item is null || item.Status == ConnectionStatus.Imported ? Task.CompletedTask : Connections.ConnectAsync(RefreshRequest(item));
+    private void Refresh(ConnectionItem? item)
+    {
+        if (item is not null && item.Status != ConnectionStatus.Imported)
+            _ = Connections.ConnectAsync(RefreshRequest(item));
+    }
 
     private ConnectionRequest RefreshRequest(ConnectionItem item)
     {
