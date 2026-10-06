@@ -84,9 +84,9 @@ public sealed partial class HostsViewModel : ObservableObject
 {
     private readonly ConfigStore _config;
     private readonly IDialogService _dialogs;
-    private readonly Func<IReadOnlyList<SavedHost>, Task> _connect;
+    private readonly Func<IReadOnlyList<SavedHost>, Task<int>> _connect;
 
-    public HostsViewModel(ConfigStore config, IDialogService dialogs, Func<IReadOnlyList<SavedHost>, Task> connect)
+    public HostsViewModel(ConfigStore config, IDialogService dialogs, Func<IReadOnlyList<SavedHost>, Task<int>> connect)
     {
         _config = config;
         _dialogs = dialogs;
@@ -172,6 +172,13 @@ public sealed partial class HostsViewModel : ObservableObject
         Status = $"Saved {host.Label}.";
     }
 
+    private static string Summarise(int started, int requested)
+    {
+        var skipped = requested - started;
+        var text = $"Queued {started} host(s).";
+        return skipped > 0 ? text + $" {skipped} already connected or skipped — use ⟳ Refresh to re-collect." : text;
+    }
+
     private string? RejectExisting(ConnectionRequest r, SavedHost? except) =>
         _config.Config.Hosts.Any(h => h != except && h.Platform == r.Platform
                                       && string.Equals(h.Address, r.Address, StringComparison.OrdinalIgnoreCase))
@@ -239,8 +246,7 @@ public sealed partial class HostsViewModel : ObservableObject
             Status = "Tick the hosts to connect, or select one.";
             return;
         }
-        await _connect(selected);
-        Status = $"Queued {selected.Count} host(s).";
+        Status = Summarise(await _connect(selected), selected.Count);
     }
 
     [RelayCommand]
@@ -305,7 +311,6 @@ public sealed partial class HostsViewModel : ObservableObject
             Status = $"Group '{group.Name}' has no hosts. Edit a host to assign it.";
             return;
         }
-        await _connect(members);
-        Status = $"Queued {members.Count} host(s) from '{group.Name}'.";
+        Status = Summarise(await _connect(members), members.Count) + $" (group '{group.Name}')";
     }
 }

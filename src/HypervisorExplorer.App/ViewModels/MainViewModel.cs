@@ -295,12 +295,20 @@ public sealed partial class MainViewModel : ViewModelBase
         _config.Save();
     }
 
-    /// <summary>Connects saved hosts, prompting only for those without usable credentials.</summary>
-    public async Task ConnectSaved(IReadOnlyList<SavedHost> hosts)
+    /// <summary>
+    /// Connects saved hosts, prompting only for those without usable credentials. Hosts that are already connected
+    /// or collecting are skipped unless <paramref name="includeConnected"/> (used by Refresh). Returns how many started.
+    /// </summary>
+    public async Task<int> ConnectSaved(IReadOnlyList<SavedHost> hosts, bool includeConnected = false)
     {
+        var started = 0;
         foreach (var host in hosts)
         {
             var request = _config.BuildRequest(host);
+            if (!includeConnected && Connections.Find(request.DisplayName) is { } existing
+                && (existing.IsBusy || existing.Status == ConnectionStatus.Connected))
+                continue;
+
             ConnectDialogResult? dialog = null;
             if (!ConfigStore.HasUsableCredentials(request))
             {
@@ -312,14 +320,16 @@ public sealed partial class MainViewModel : ViewModelBase
                 request = dialog.Request;
             }
             StartConnection(request, dialog);
+            started++;
         }
+        return started;
     }
 
     [RelayCommand]
     private async Task ManageHosts()
     {
         if (Dialogs is null) return;
-        await Dialogs.ShowHostsWindowAsync(new HostsViewModel(_config, Dialogs, ConnectSaved));
+        await Dialogs.ShowHostsWindowAsync(new HostsViewModel(_config, Dialogs, hosts => ConnectSaved(hosts)));
     }
 
     [RelayCommand]
@@ -352,7 +362,7 @@ public sealed partial class MainViewModel : ViewModelBase
             else
                 _ = Connections.ConnectAsync(request); // fails with a clear "credentials needed" message
         }
-        if (needPrompt.Count > 0) _ = ConnectSaved(needPrompt);
+        if (needPrompt.Count > 0) _ = ConnectSaved(needPrompt, includeConnected: true);
     }
 
     private ConnectionRequest RefreshRequest(ConnectionItem item)

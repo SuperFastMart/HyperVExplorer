@@ -89,7 +89,7 @@ foreach (var (addr, platform) in new[] { ("192.0.2.50", HypervisorExplorer.Core.
         GroupId = platform == HypervisorExplorer.Core.Model.Platform.Proxmox ? store.Config.Groups[0].Id : null,
     });
 }
-var hosts = new HostsWindow { DataContext = new HostsViewModel(store, window, _ => Task.CompletedTask) };
+var hosts = new HostsWindow { DataContext = new HostsViewModel(store, window, _ => Task.FromResult(0)) };
 hosts.Show();
 Save(hosts, "08-saved-hosts");
 hosts.Close();

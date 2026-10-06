@@ -56,7 +56,7 @@ public class HostsViewModelTests : IDisposable
     {
         var store = StoreWithHost(out var original);
         var dialogs = new FakeDialogs(vm => vm.Address = "10.44.102.42");
-        var vm = new HostsViewModel(store, dialogs, _ => Task.CompletedTask);
+        var vm = new HostsViewModel(store, dialogs, _ => Task.FromResult(0));
         vm.SelectedHost = vm.Hosts.Single();
 
         await vm.DuplicateHostCommand.ExecuteAsync(null);
@@ -81,7 +81,7 @@ public class HostsViewModelTests : IDisposable
         store.Config.Groups.Add(group);
         store.Config.Hosts.Add(new SavedHost { Address = "10.0.0.1", Platform = Platform.Proxmox, GroupId = group.Id });
 
-        var vm = new HostsViewModel(store, new FakeDialogs(d => d.Address = "10.0.0.2"), _ => Task.CompletedTask);
+        var vm = new HostsViewModel(store, new FakeDialogs(d => d.Address = "10.0.0.2"), _ => Task.FromResult(0));
         vm.SelectedHost = vm.Hosts.Single();
         await vm.DuplicateHostCommand.ExecuteAsync(null);
 
@@ -96,7 +96,7 @@ public class HostsViewModelTests : IDisposable
     {
         var store = StoreWithHost(out _);
         var dialogs = new FakeDialogs(_ => { });
-        var vm = new HostsViewModel(store, dialogs, _ => Task.CompletedTask);
+        var vm = new HostsViewModel(store, dialogs, _ => Task.FromResult(0));
         vm.SelectedHost = vm.Hosts.Single();
 
         await vm.DuplicateHostCommand.ExecuteAsync(null);
