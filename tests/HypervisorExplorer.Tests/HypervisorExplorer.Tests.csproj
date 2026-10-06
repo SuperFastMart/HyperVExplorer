@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\HypervisorExplorer.Core\HypervisorExplorer.Core.csproj" />
     <ProjectReference Include="..\..\src\HypervisorExplorer.Collectors\HypervisorExplorer.Collectors.csproj" />
+    <ProjectReference Include="..\..\src\HypervisorExplorer.App\HypervisorExplorer.App.csproj" />
   </ItemGroup>
 
 </Project>

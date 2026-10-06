@@ -97,7 +97,7 @@ public sealed partial class HostsViewModel : ObservableObject
     public ObservableCollection<SavedHostItem> Hosts { get; } = [];
     public ObservableCollection<HostGroup> Groups { get; } = [];
 
-    [ObservableProperty] [NotifyCanExecuteChangedFor(nameof(EditHostCommand), nameof(DeleteHostCommand))]
+    [ObservableProperty] [NotifyCanExecuteChangedFor(nameof(EditHostCommand), nameof(DuplicateHostCommand), nameof(DeleteHostCommand))]
     private SavedHostItem? _selectedHost;
 
     [ObservableProperty] [NotifyCanExecuteChangedFor(nameof(EditGroupCommand), nameof(DeleteGroupCommand), nameof(ConnectGroupCommand))]
@@ -117,16 +117,66 @@ public sealed partial class HostsViewModel : ObservableObject
     [RelayCommand]
     private async Task AddHost()
     {
-        var vm = new ConnectDialogViewModel(_config.Config.Groups, editOnly: true);
+        var vm = new ConnectDialogViewModel(_config.Config.Groups, editOnly: true) { ExtraValidation = r => RejectExisting(r, null) };
         if (await _dialogs.ShowConnectDialogAsync(vm) is not { } result) return;
-        var host = _config.Remember(result.Request, result.SaveCredentials);
-        host.GroupId = result.GroupId;
-        host.DisplayName = result.DisplayName;
-        host.LastConnected = null;
-        if (result.GroupId is not null && result.Request.Username is null) host.CredentialKind = null;
+        SaveNewHost(result);
+    }
+
+    /// <summary>Copies the selected host's settings and credentials into a new host; only the address needs changing.</summary>
+    [RelayCommand(CanExecute = nameof(HasHost))]
+    private async Task DuplicateHost()
+    {
+        if (SelectedHost is not { } item) return;
+        var source = item.Host;
+        var vm = new ConnectDialogViewModel(_config.Config.Groups, editOnly: true)
+        {
+            TitleOverride = $"Duplicate {source.Label}",
+            ExtraValidation = r => RejectExisting(r, null),
+        };
+        var request = source.CredentialKind is null
+            ? new ConnectionRequest { Platform = source.Platform, Address = source.Address, Port = source.Port, IgnoreCertificateErrors = source.IgnoreCertificateErrors, UseSsl = source.UseSsl }
+            : _config.BuildRequest(source);
+        vm.LoadFrom(request, source.GroupId);
+        vm.SaveCredentials = source.ProtectedSecret is not null || source.CredentialKind is null;
+        if (await _dialogs.ShowConnectDialogAsync(vm) is not { } result) return;
+        SaveNewHost(result);
+    }
+
+    private void SaveNewHost(ConnectDialogResult result)
+    {
+        var r = result.Request;
+        var host = new SavedHost
+        {
+            Address = r.Address,
+            Platform = r.Platform,
+            Port = r.Port,
+            IgnoreCertificateErrors = r.IgnoreCertificateErrors,
+            UseSsl = r.UseSsl,
+            GroupId = result.GroupId,
+            DisplayName = result.DisplayName,
+        };
+        if (result.GroupId is not null && r.Username is null && r.CredentialKind != CredentialKind.CurrentUser)
+        {
+            host.CredentialKind = null; // inherit the group's credentials
+        }
+        else
+        {
+            host.CredentialKind = r.CredentialKind;
+            host.Username = r.Username;
+            if (result.SaveCredentials) _config.SetSecret(host, r.Secret);
+        }
+        _config.Config.Hosts.Add(host);
         _config.Save();
         Reload();
+        SelectedHost = Hosts.FirstOrDefault(h => h.Host == host);
+        Status = $"Saved {host.Label}.";
     }
+
+    private string? RejectExisting(ConnectionRequest r, SavedHost? except) =>
+        _config.Config.Hosts.Any(h => h != except && h.Platform == r.Platform
+                                      && string.Equals(h.Address, r.Address, StringComparison.OrdinalIgnoreCase))
+            ? $"{r.Address} is already saved as a {RvToolsTables.PlatformName(r.Platform)} host. Change the address."
+            : null;
 
     private bool HasHost => SelectedHost is not null;
 
@@ -135,7 +185,7 @@ public sealed partial class HostsViewModel : ObservableObject
     {
         if (SelectedHost is not { } item) return;
         var host = item.Host;
-        var vm = new ConnectDialogViewModel(_config.Config.Groups, editOnly: true);
+        var vm = new ConnectDialogViewModel(_config.Config.Groups, editOnly: true) { ExtraValidation = r => RejectExisting(r, host) };
         var request = host.CredentialKind is null
             ? new ConnectionRequest { Platform = host.Platform, Address = host.Address, Port = host.Port, IgnoreCertificateErrors = host.IgnoreCertificateErrors, UseSsl = host.UseSsl }
             : _config.BuildRequest(host);

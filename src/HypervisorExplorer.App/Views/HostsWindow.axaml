@@ -12,6 +12,8 @@
             <Button Classes="primary" Content="Connect selected" Command="{Binding ConnectCheckedCommand}"/>
             <Button Content="Add…" Command="{Binding AddHostCommand}"/>
             <Button Content="Edit…" Command="{Binding EditHostCommand}"/>
+            <Button Content="Duplicate…" Command="{Binding DuplicateHostCommand}"
+                    ToolTip.Tip="Copy this host's platform, group and credentials to a new host — just change the address"/>
             <Button Content="Remove" Command="{Binding DeleteHostCommand}"/>
             <Button Content="Tick all" Command="{Binding SelectAllCommand}"/>
         </StackPanel>

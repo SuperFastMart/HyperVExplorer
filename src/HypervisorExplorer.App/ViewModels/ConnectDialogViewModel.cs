@@ -36,7 +36,13 @@ public sealed partial class ConnectDialogViewModel : ObservableObject
 
     /// <summary>When true the dialog saves the host without connecting.</summary>
     public bool EditOnly { get; }
-    public string Title => EditOnly ? "Saved host" : "Connect";
+    public string Title => TitleOverride ?? (EditOnly ? "Saved host" : "Connect");
+
+    /// <summary>Optional dialog title, e.g. "Duplicate pve01".</summary>
+    public string? TitleOverride { get; init; }
+
+    /// <summary>Extra check run on OK (e.g. reject an address that is already saved); returns an error or null.</summary>
+    public Func<ConnectionRequest, string?>? ExtraValidation { get; init; }
     public string PrimaryButtonText => EditOnly ? "Save" : "Connect";
 
     public ObservableCollection<CredentialOption> CredentialOptions { get; } = [];
@@ -222,6 +228,11 @@ public sealed partial class ConnectDialogViewModel : ObservableObject
             ExpandCluster = ExpandCluster,
             Group = SelectedGroup.Id is null ? null : SelectedGroup.Name,
         };
+        if (ExtraValidation?.Invoke(request) is { } validationError)
+        {
+            Error = validationError;
+            return null;
+        }
         return new ConnectDialogResult(request, SaveCredentials, SelectedGroup.Id,
             string.IsNullOrWhiteSpace(DisplayName) ? null : DisplayName.Trim());
     }
