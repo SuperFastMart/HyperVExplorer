@@ -115,8 +115,23 @@
 
                 <Border Grid.Row="2" Classes="panel" Padding="8" MaxHeight="320" IsVisible="{Binding HasConnections}">
                     <DockPanel>
-                        <TextBlock DockPanel.Dock="Top" Classes="section" Text="SOURCES"/>
-                        <ScrollViewer>
+                        <ToggleButton DockPanel.Dock="Top" IsChecked="{Binding SourcesExpanded}" Classes="header"
+                                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                      ToolTip.Tip="Show or hide the source list">
+                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                <TextBlock Classes="section" Text="SOURCES" Margin="0" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1" Classes="subtle" Text="{Binding SourcesSummary}" Margin="8,0"
+                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                           Classes.err="{Binding AnySourceFailed}">
+                                    <TextBlock.Styles>
+                                        <Style Selector="TextBlock.err"><Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/></Style>
+                                    </TextBlock.Styles>
+                                </TextBlock>
+                                <TextBlock Grid.Column="2" Classes="subtle" FontSize="15" Margin="0,0,4,0" VerticalAlignment="Center"
+                                           Text="{Binding SourcesExpanded, Converter={x:Static vm:Converters.Chevron}}"/>
+                            </Grid>
+                        </ToggleButton>
+                        <ScrollViewer IsVisible="{Binding SourcesExpanded}" Margin="0,6,0,0">
                             <ItemsControl ItemsSource="{Binding Connections.Connections}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate DataType="svc:ConnectionItem">

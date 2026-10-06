@@ -43,6 +43,7 @@ public sealed class AppSettings
     public int MaxParallelConnections { get; set; } = 4;
     public int SnapshotAgeWarningDays { get; set; } = 7;
     public bool HideEmptyColumns { get; set; } = true;
+    public bool SourcesExpanded { get; set; } = true;
     public string? Theme { get; set; } = "Dark";
     public string? LastExportDirectory { get; set; }
 }

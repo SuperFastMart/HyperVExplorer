@@ -39,6 +39,7 @@ public sealed partial class MainViewModel : ViewModelBase
         _config = config;
         HealthAnalyzer.SnapshotAgeWarningDays = config.Config.Settings.SnapshotAgeWarningDays;
         _hideEmptyColumns = config.Config.Settings.HideEmptyColumns;
+        _sourcesExpanded = config.Config.Settings.SourcesExpanded;
 
         Connections = new ConnectionManager(_store, config.Config.Settings.MaxParallelConnections);
         Connections.Succeeded += OnConnectionSucceeded;
@@ -50,7 +51,11 @@ public sealed partial class MainViewModel : ViewModelBase
                 _config.Save();
             }
         };
-        Connections.Connections.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasConnections));
+        Connections.Connections.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasConnections));
+            UpdateSourcesSummary();
+        };
         Connections.Activity.CollectionChanged += OnActivityChanged;
 
         var all = RvToolsTables.All.Concat(ExtendedTables.All).ToDictionary(t => t.Name);
@@ -92,6 +97,30 @@ public sealed partial class MainViewModel : ViewModelBase
     [ObservableProperty] private string _statusText = "Ready — connect to a host, open a saved inventory, or load demo data.";
     [ObservableProperty] private string _summaryText = "";
     [ObservableProperty] private bool _isBusy;
+    [ObservableProperty] private bool _sourcesExpanded;
+    [ObservableProperty] private string _sourcesSummary = "";
+    [ObservableProperty] private bool _anySourceFailed;
+
+    partial void OnSourcesExpandedChanged(bool value)
+    {
+        _config.Config.Settings.SourcesExpanded = value;
+        _config.Save();
+    }
+
+    /// <summary>One-line status for the (possibly collapsed) Sources panel header.</summary>
+    private void UpdateSourcesSummary()
+    {
+        var all = Connections.Connections;
+        var ok = all.Count(c => c.Status is ConnectionStatus.Connected or ConnectionStatus.Imported);
+        var failed = all.Count(c => c.Status == ConnectionStatus.Failed);
+        var busy = all.Count(c => c.IsBusy);
+        var parts = new List<string> { $"{all.Count} source{(all.Count == 1 ? "" : "s")}" };
+        if (ok > 0) parts.Add($"{ok} OK");
+        if (busy > 0) parts.Add($"{busy} collecting");
+        if (failed > 0) parts.Add($"{failed} failed");
+        SourcesSummary = string.Join(" · ", parts);
+        AnySourceFailed = failed > 0;
+    }
 
     public bool HasConnections => Connections.Connections.Count > 0;
     public bool HasData => _inventory.Sources.Count > 0;
@@ -130,6 +159,7 @@ public sealed partial class MainViewModel : ViewModelBase
         if (Connections.Activity.FirstOrDefault() is { } latest)
             StatusText = $"{latest.Source}: {latest.Message}";
         IsBusy = Connections.AnyBusy;
+        UpdateSourcesSummary();
     }
 
     private void OnInventoryChanged()

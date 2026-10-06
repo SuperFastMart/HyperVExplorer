@@ -60,6 +60,10 @@ vm.SelectedTable = vm.VisibleTables.First(t => t.Name == "vHost");
 vm.ShowActivity = true;
 Save(window, "05-vhost-activity");
 
+vm.SourcesExpanded = false;
+Save(window, "09-sources-collapsed");
+vm.SourcesExpanded = true;
+
 vm.SearchText = "sql";
 for (var i = 0; i < 20; i++)
 {

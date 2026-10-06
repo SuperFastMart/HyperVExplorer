@@ -32,6 +32,20 @@
         <Setter Property="BorderThickness" Value="0"/>
     </Style>
 
+    <!-- Flat clickable panel header (e.g. collapsible Sources) -->
+    <Style Selector="ToggleButton.header">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="2,2"/>
+        <Setter Property="CornerRadius" Value="4"/>
+    </Style>
+    <Style Selector="ToggleButton.header:checked /template/ ContentPresenter, ToggleButton.header:unchecked /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent"/>
+    </Style>
+    <Style Selector="ToggleButton.header:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="#232A3B"/>
+    </Style>
+
     <Style Selector="TextBlock.subtle">
         <Setter Property="Foreground" Value="{DynamicResource SubtleText}"/>
         <Setter Property="FontSize" Value="12"/>
