@@ -26,7 +26,7 @@ public sealed record MetaRow(string Server, DateTime Created);
 /// <summary>Table definitions for every RVTools worksheet.</summary>
 public static class RvToolsTables
 {
-    public const string AppVersion = "3.0.0";
+    public static string AppVersion => AppInfo.Version;
 
     private const double MiB = 1024 * 1024;
 

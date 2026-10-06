@@ -39,6 +39,7 @@ public partial class MainWindow : Window, IDialogService
         _vm = DataContext as MainViewModel;
         if (_vm is null) return;
         _vm.Dialogs = this;
+        _vm.ShutdownRequested += () => Close();
         _vm.ColumnsChanged += RebuildColumns;
         _vm.PropertyChanged += OnVmPropertyChanged;
         RebuildColumns();

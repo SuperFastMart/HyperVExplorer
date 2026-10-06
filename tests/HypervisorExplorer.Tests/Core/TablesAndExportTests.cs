@@ -242,3 +242,20 @@ public class TablesAndExportTests
         Assert.Equal(2, store.Current.Sources.Count);
     }
 }
+
+public class AppInfoTests
+{
+    [Theory]
+    [InlineData("v3.0.2", "3.0.1", true)]
+    [InlineData("3.0.10", "3.0.9", true)]
+    [InlineData("v3.0.1", "3.0.1", false)]
+    [InlineData("v3.0.0", "3.0.1", false)]
+    [InlineData("v3.1.0-beta", "3.0.9", true)]
+    [InlineData("garbage", "3.0.1", false)]
+    public void Version_comparison(string candidate, string current, bool newer) =>
+        Assert.Equal(newer, HypervisorExplorer.Core.AppInfo.IsNewer(candidate, current));
+
+    [Fact]
+    public void Version_has_no_commit_suffix() =>
+        Assert.DoesNotContain('+', HypervisorExplorer.Core.AppInfo.Version);
+}

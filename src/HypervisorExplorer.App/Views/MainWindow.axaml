@@ -60,6 +60,9 @@
                                     <CheckBox Content="Show empty tables" IsChecked="{Binding ShowEmptyTables}"/>
                                     <CheckBox Content="Hide columns with no data" IsChecked="{Binding HideEmptyColumns}"/>
                                     <Separator/>
+                                    <Button Classes="link" Content="Check for updates" Command="{Binding CheckForUpdatesCommand}"/>
+                                    <TextBlock Classes="subtle" Text="{Binding VersionText}" Margin="4,0,0,4"/>
+                                    <Separator/>
                                     <Button Classes="link" Content="Load demo data" Command="{Binding LoadDemoCommand}"/>
                                     <Button Classes="link" Content="Disconnect all" Command="{Binding ClearAllCommand}"/>
                                 </StackPanel>
@@ -69,6 +72,9 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <Button Classes="primary" Content="{Binding UpdateButtonText}" Command="{Binding InstallUpdateCommand}"
+                            IsVisible="{Binding AvailableUpdate, Converter={x:Static ObjectConverters.IsNotNull}}"
+                            ToolTip.Tip="A newer version is available. The app closes, updates itself and reopens."/>
                     <ProgressBar IsIndeterminate="True" Width="80" IsVisible="{Binding IsBusy}" VerticalAlignment="Center"/>
                     <TextBox x:Name="SearchBox" Width="300" PlaceholderText="Search all columns (Ctrl+F)…" Text="{Binding SearchText}"
                              VerticalAlignment="Center" CornerRadius="6"/>

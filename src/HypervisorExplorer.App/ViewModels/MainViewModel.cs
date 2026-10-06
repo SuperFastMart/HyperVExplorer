@@ -75,7 +75,73 @@ public sealed partial class MainViewModel : ViewModelBase
 
         RebuildVisibleTables();
         OnInventoryChanged();
+
+        if (config.Config.Settings.CheckForUpdates && !Core.AppInfo.IsDevelopmentBuild)
+            _ = CheckForUpdatesQuietlyAsync();
     }
+
+    // ---------------- Updates ----------------
+
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(UpdateButtonText))] private UpdateInfo? _availableUpdate;
+
+    public string UpdateButtonText => AvailableUpdate is null ? "" : $"⬆ Update to {AvailableUpdate.Version}";
+
+    private async Task CheckForUpdatesQuietlyAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(3));
+            AvailableUpdate = await UpdateService.CheckAsync(CancellationToken.None);
+            if (AvailableUpdate is not null)
+                Connections.Log("Update", $"Version {AvailableUpdate.Version} is available (you have {Core.AppInfo.Version}).");
+        }
+        catch (Exception)
+        {
+            // Offline or GitHub unreachable: stay quiet; the user can check manually.
+        }
+    }
+
+    [RelayCommand]
+    private async Task CheckForUpdates()
+    {
+        StatusText = "Checking for updates…";
+        try
+        {
+            AvailableUpdate = await UpdateService.CheckAsync(CancellationToken.None);
+            StatusText = AvailableUpdate is null
+                ? $"You have the latest version ({Core.AppInfo.Version})."
+                : $"Version {AvailableUpdate.Version} is available (you have {Core.AppInfo.Version}).";
+            if (AvailableUpdate is not null) await InstallUpdate();
+        }
+        catch (Exception ex)
+        {
+            StatusText = "Could not check for updates: " + ex.Message;
+        }
+    }
+
+    [RelayCommand]
+    private async Task InstallUpdate()
+    {
+        if (AvailableUpdate is not { } update || Dialogs is null) return;
+        if (!await Dialogs.ConfirmAsync("Update Hypervisor Explorer",
+                $"Update from {Core.AppInfo.Version} to {update.Version}?\n\nThe app will close, update itself and reopen. " +
+                "Saved hosts and credentials are kept; collected data is not, so save a snapshot first if you need it."))
+            return;
+        try
+        {
+            UpdateService.StartInstaller();
+            Connections.CancelAll();
+            ShutdownRequested?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            await Dialogs.ShowMessageAsync("Update failed to start",
+                ex.Message + "\n\nYou can update manually with the one-line installer: see the Download & Installation page.");
+        }
+    }
+
+    /// <summary>Raised when the app should exit (e.g. to let the updater replace it).</summary>
+    public event Action? ShutdownRequested;
 
     public IDialogService? Dialogs { get; set; }
     public ConnectionManager Connections { get; }
@@ -124,7 +190,8 @@ public sealed partial class MainViewModel : ViewModelBase
 
     public bool HasConnections => Connections.Connections.Count > 0;
     public bool HasData => _inventory.Sources.Count > 0;
-    public string WindowTitle => "Hypervisor Explorer " + RvToolsTables.AppVersion;
+    public string WindowTitle => "Hypervisor Explorer " + Core.AppInfo.Version;
+    public string VersionText => "Version " + Core.AppInfo.Version;
 
     /// <summary>Per-table user-hidden columns (by header).</summary>
     public Dictionary<string, HashSet<string>> HiddenColumns { get; } = [];
