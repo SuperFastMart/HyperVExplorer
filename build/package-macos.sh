@@ -5,7 +5,7 @@ set -euo pipefail
 VERSION="${1:-0.0.0-dev}"; RUNTIME="${2:-osx-arm64}"
 SEMVER="${VERSION#v}"; NUMERIC="${SEMVER%%-*}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="$ROOT/artifacts/publish"; TMP="$ROOT/artifacts/tmp-$RUNTIME"
+OUT="${OUT_DIR:-$ROOT/artifacts/publish}"; TMP="$OUT/../tmp-$RUNTIME"
 APP="$OUT/Hypervisor Explorer.app"
 rm -rf "$TMP"; mkdir -p "$OUT"
 
@@ -35,12 +35,16 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 codesign --force --deep -s - "$APP" >/dev/null 2>&1 || true
 cp "$TMP/cli/hvexplorer" "$OUT/hvexplorer"
-rm -rf "$TMP"
 
 if [[ "${ZIP:-0}" == "1" ]]; then
+  # Stage the app and CLI together, then zip the folder's contents (ditto keeps the bundle and exec bits intact).
   ZIPFILE="$OUT/HypervisorExplorer-$SEMVER-$RUNTIME.zip"
-  rm -f "$ZIPFILE"
-  (cd "$OUT" && ditto -c -k --keepParent "Hypervisor Explorer.app" "$ZIPFILE.tmp" && zip -qj "$ZIPFILE.tmp" hvexplorer && mv "$ZIPFILE.tmp" "$ZIPFILE")
+  STAGE="$TMP/zip"
+  rm -rf "$STAGE" "$ZIPFILE"; mkdir -p "$STAGE"
+  cp -R "$APP" "$STAGE/"
+  cp "$OUT/hvexplorer" "$STAGE/"
+  ditto -c -k "$STAGE" "$ZIPFILE"
   echo "Created $ZIPFILE"
 fi
+rm -rf "$TMP"
 echo "Built $APP"
