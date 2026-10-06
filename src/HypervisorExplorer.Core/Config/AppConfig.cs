@@ -137,7 +137,11 @@ public sealed class ConfigStore
         CredentialKind kind;
         string? user;
         string? secret;
-        if (host.CredentialKind is { } hk)
+        // A host set to integrated sign-in can't use it off Windows: fall back to its group's credentials.
+        var hostKind = host.CredentialKind == CredentialKind.CurrentUser && !OperatingSystem.IsWindows() && group is not null
+            ? null
+            : host.CredentialKind;
+        if (hostKind is { } hk)
         {
             kind = hk;
             user = host.Username;
@@ -151,7 +155,7 @@ public sealed class ConfigStore
         }
         else
         {
-            kind = host.Platform == Platform.HyperV ? CredentialKind.CurrentUser : CredentialKind.UsernamePassword;
+            kind = host.Platform == Platform.HyperV && OperatingSystem.IsWindows() ? CredentialKind.CurrentUser : CredentialKind.UsernamePassword;
             user = null;
             secret = null;
         }
@@ -171,8 +175,10 @@ public sealed class ConfigStore
     }
 
     /// <summary>True when the request has what it needs to connect without prompting.</summary>
+    /// <remarks>Integrated (current user) sign-in only exists on Windows; elsewhere such hosts must prompt.</remarks>
     public static bool HasUsableCredentials(ConnectionRequest r) =>
-        r.CredentialKind == CredentialKind.CurrentUser || (!string.IsNullOrEmpty(r.Username) && !string.IsNullOrEmpty(r.Secret));
+        (r.CredentialKind == CredentialKind.CurrentUser && OperatingSystem.IsWindows())
+        || (r.CredentialKind != CredentialKind.CurrentUser && !string.IsNullOrEmpty(r.Username) && !string.IsNullOrEmpty(r.Secret));
 
     /// <summary>
     /// Records a successful connection. Credentials identical to the host's group are not duplicated onto the host

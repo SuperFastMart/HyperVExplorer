@@ -47,8 +47,47 @@ public class ConfigTests : IDisposable
         Assert.Equal("London", a.Group);
 
         var b = store.BuildRequest(overrides);
-        Assert.Equal(CredentialKind.CurrentUser, b.CredentialKind);
-        Assert.True(ConfigStore.HasUsableCredentials(b));
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal(CredentialKind.CurrentUser, b.CredentialKind);
+            Assert.True(ConfigStore.HasUsableCredentials(b));
+        }
+        else
+        {
+            // Integrated sign-in is impossible here, so the group's credentials are used instead.
+            Assert.Equal(@"CORP\svc", b.Username);
+        }
+    }
+
+    [Fact]
+    public void Current_user_host_uses_group_credentials_off_windows()
+    {
+        var store = new ConfigStore(_dir);
+        var group = new HostGroup { Name = "Site", Username = @"CONTOSO\svc" };
+        store.SetSecret(group, "grp");
+        store.Config.Groups.Add(group);
+        var host = new SavedHost { Address = "hv01", Platform = Platform.HyperV, GroupId = group.Id, CredentialKind = CredentialKind.CurrentUser };
+
+        var req = store.BuildRequest(host);
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal(CredentialKind.CurrentUser, req.CredentialKind);
+        }
+        else
+        {
+            Assert.Equal(@"CONTOSO\svc", req.Username);
+            Assert.Equal("grp", req.Secret);
+            Assert.True(ConfigStore.HasUsableCredentials(req));
+        }
+    }
+
+    [Fact]
+    public void Hyperv_host_saved_without_credentials_prompts_off_windows()
+    {
+        var store = new ConfigStore(_dir);
+        var req = store.BuildRequest(new SavedHost { Address = "hv01", Platform = Platform.HyperV });
+        Assert.Equal(OperatingSystem.IsWindows(), ConfigStore.HasUsableCredentials(req));
+        if (!OperatingSystem.IsWindows()) Assert.Equal(CredentialKind.UsernamePassword, req.CredentialKind);
     }
 
     [Fact]

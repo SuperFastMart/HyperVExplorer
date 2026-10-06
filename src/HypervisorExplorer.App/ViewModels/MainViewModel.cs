@@ -325,16 +325,34 @@ public sealed partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void RefreshAll()
     {
-        // Not awaited: the connection manager runs these in parallel up to its limit.
-        foreach (var item in Connections.Connections.Where(c => c.Status is ConnectionStatus.Connected or ConnectionStatus.Failed or ConnectionStatus.Cancelled).ToList())
-            _ = Connections.ConnectAsync(RefreshRequest(item));
+        var items = Connections.Connections.Where(c => c.Status is ConnectionStatus.Connected or ConnectionStatus.Failed or ConnectionStatus.Cancelled).ToList();
+        RefreshItems(items);
     }
 
     [RelayCommand]
     private void Refresh(ConnectionItem? item)
     {
-        if (item is not null && item.Status != ConnectionStatus.Imported)
-            _ = Connections.ConnectAsync(RefreshRequest(item));
+        if (item is not null && item.Status != ConnectionStatus.Imported) RefreshItems([item]);
+    }
+
+    /// <summary>
+    /// Re-collects sources. Ones with usable credentials start immediately (in parallel); saved hosts that lack
+    /// them go through <see cref="ConnectSaved"/>, which prompts. Not awaited, so commands stay enabled.
+    /// </summary>
+    private void RefreshItems(IReadOnlyList<ConnectionItem> items)
+    {
+        var needPrompt = new List<SavedHost>();
+        foreach (var item in items)
+        {
+            var request = RefreshRequest(item);
+            if (ConfigStore.HasUsableCredentials(request))
+                _ = Connections.ConnectAsync(request);
+            else if (_config.Config.FindHost(item.Request.Address, item.Platform) is { } saved)
+                needPrompt.Add(saved);
+            else
+                _ = Connections.ConnectAsync(request); // fails with a clear "credentials needed" message
+        }
+        if (needPrompt.Count > 0) _ = ConnectSaved(needPrompt);
     }
 
     private ConnectionRequest RefreshRequest(ConnectionItem item)
