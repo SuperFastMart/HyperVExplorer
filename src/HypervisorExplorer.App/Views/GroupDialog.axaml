@@ -3,30 +3,34 @@
         xmlns:vm="using:HypervisorExplorer.App.ViewModels"
         x:Class="HypervisorExplorer.App.Views.GroupDialog"
         x:DataType="vm:GroupEditViewModel"
-        Title="Host group" Width="460" SizeToContent="Height" CanResize="False"
+        Title="Host group" Width="460" Height="400" MinHeight="360" CanResize="True"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
-    <StackPanel Margin="20" Spacing="10">
-        <TextBlock Classes="h1" Text="Host group"/>
-        <TextBlock Classes="subtle" TextWrapping="Wrap"
-                   Text="A group is a site or cluster label (exported as the RVTools 'Datacenter') with optional shared credentials. Hosts without their own credentials use the group's."/>
-        <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8">
-            <TextBlock Text="Name" VerticalAlignment="Center"/>
-            <TextBox Grid.Column="1" Text="{Binding Name}" PlaceholderText="e.g. London DC"/>
-            <TextBlock Grid.Row="1" Text="Sign in with" VerticalAlignment="Center"/>
-            <ComboBox Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{x:Static vm:GroupEditViewModel.KindOptions}" SelectedItem="{Binding SelectedKind}">
-                <ComboBox.ItemTemplate>
-                    <DataTemplate DataType="vm:CredentialOption"><TextBlock Text="{Binding Label}"/></DataTemplate>
-                </ComboBox.ItemTemplate>
-            </ComboBox>
-            <TextBlock Grid.Row="2" Text="Username" VerticalAlignment="Center" IsVisible="{Binding NeedsCredentials}"/>
-            <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Username}" IsVisible="{Binding NeedsCredentials}" PlaceholderText="user, DOMAIN\user, user@realm!token"/>
-            <TextBlock Grid.Row="3" Text="Password / secret" VerticalAlignment="Center" IsVisible="{Binding NeedsCredentials}" TextWrapping="Wrap"/>
-            <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Secret}" PasswordChar="●" PlaceholderText="{Binding SecretWatermark}" IsVisible="{Binding NeedsCredentials}"/>
-        </Grid>
-        <TextBlock Text="{Binding Error}" Foreground="{DynamicResource ErrorBrush}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}"/>
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="20,8,20,16">
             <Button Content="Cancel" Click="OnCancel" IsCancel="True"/>
             <Button Classes="primary" Content="Save" Click="OnOk" IsDefault="True"/>
         </StackPanel>
-    </StackPanel>
+        <ScrollViewer>
+            <StackPanel Margin="20,20,20,8" Spacing="10">
+                <TextBlock Classes="h1" Text="Host group"/>
+                <TextBlock Classes="subtle" TextWrapping="Wrap"
+                           Text="A group is a site or cluster label (exported as the RVTools 'Datacenter') with optional shared credentials. Hosts without their own credentials use the group's."/>
+                <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8">
+                    <TextBlock Text="Name" VerticalAlignment="Center"/>
+                    <TextBox Grid.Column="1" Text="{Binding Name}" PlaceholderText="e.g. London DC"/>
+                    <TextBlock Grid.Row="1" Text="Sign in with" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{x:Static vm:GroupEditViewModel.KindOptions}" SelectedItem="{Binding SelectedKind}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate DataType="vm:CredentialOption"><TextBlock Text="{Binding Label}"/></DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <TextBlock Grid.Row="2" Text="Username" VerticalAlignment="Center" IsVisible="{Binding NeedsCredentials}"/>
+                    <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Username}" IsVisible="{Binding NeedsCredentials}" PlaceholderText="user, DOMAIN\user, user@realm!token"/>
+                    <TextBlock Grid.Row="3" Text="Password / secret" VerticalAlignment="Center" IsVisible="{Binding NeedsCredentials}" TextWrapping="Wrap"/>
+                    <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Secret}" PasswordChar="●" PlaceholderText="{Binding SecretWatermark}" IsVisible="{Binding NeedsCredentials}"/>
+                </Grid>
+                <TextBlock Text="{Binding Error}" Foreground="{DynamicResource ErrorBrush}" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
 </Window>
