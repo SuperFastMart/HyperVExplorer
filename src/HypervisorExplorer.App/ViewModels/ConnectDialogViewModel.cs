@@ -69,7 +69,7 @@ public sealed partial class ConnectDialogViewModel : ObservableObject
     public string UsernameWatermark => (SelectedPlatform.Platform, SelectedCredential?.Kind) switch
     {
         (Platform.Proxmox, CredentialKind.ApiToken) => "user@realm!tokenname  e.g. root@pam!inventory",
-        (Platform.Proxmox, _) => "user@realm  e.g. root@pam",
+        (Platform.Proxmox, _) => "root  (or user@pve / user@domain)",
         (Platform.VMware, _) => "administrator@vsphere.local or root",
         _ => @"DOMAIN\user or user@domain",
     };
@@ -83,9 +83,11 @@ public sealed partial class ConnectDialogViewModel : ObservableObject
             "Requires WinRM on the host (Enable-PSRemoting). IP addresses must be in your WinRM TrustedHosts list. " +
             "Failover Cluster nodes are discovered automatically.",
         (Platform.Proxmox, CredentialKind.ApiToken) =>
-            "Create a token under Datacenter → Permissions → API Tokens. The PVEAuditor role on / is enough. " +
-            "Connecting to one node collects the whole cluster.",
-        (Platform.Proxmox, _) => "Use user@realm, e.g. root@pam. Connecting to one node collects the whole cluster.",
+            "For accounts with two-factor auth or unattended runs: create a token under Datacenter → Permissions → API Tokens " +
+            "(PVEAuditor on / is enough). Connecting to one node collects the whole cluster.",
+        (Platform.Proxmox, _) =>
+            "Sign in with the same account you use for the Proxmox web UI (e.g. root, or user@pve). " +
+            "Connecting to any one node collects the whole cluster.",
         (Platform.VMware, _) =>
             "Uses the vSphere API (HTTPS 443) like RVTools — no SSH needed. Point at vCenter for the whole estate, " +
             "or at an individual ESXi host. A read-only role is sufficient.",
@@ -126,8 +128,8 @@ public sealed partial class ConnectDialogViewModel : ObservableObject
                 CredentialOptions.Add(new CredentialOption(CredentialKind.UsernamePassword, "Username and password"));
                 break;
             case Platform.Proxmox:
-                CredentialOptions.Add(new CredentialOption(CredentialKind.ApiToken, "API token"));
                 CredentialOptions.Add(new CredentialOption(CredentialKind.UsernamePassword, "Username and password"));
+                CredentialOptions.Add(new CredentialOption(CredentialKind.ApiToken, "API token"));
                 break;
             default:
                 CredentialOptions.Add(new CredentialOption(CredentialKind.UsernamePassword, "Username and password"));
