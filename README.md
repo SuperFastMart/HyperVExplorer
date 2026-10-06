@@ -29,8 +29,8 @@ Inventory for a mixed hypervisor estate. Connect to **Microsoft Hyper-V** (inclu
 ## Getting started
 
 1. Download the latest release (**v3.0.1**) and unzip it. Nothing needs installing: it's a self-contained .NET 10 build.
-   - Windows: [HypervisorExplorer-3.0.1-win-x64.zip](https://github.com/SuperFastMart/HyperVExplorer/releases/download/v3.0.1/HypervisorExplorer-3.0.1-win-x64.zip)
-   - macOS (Intel and Apple Silicon): [HypervisorExplorer-3.0.1-macos-universal.zip](https://github.com/SuperFastMart/HyperVExplorer/releases/download/v3.0.1/HypervisorExplorer-3.0.1-macos-universal.zip). On first launch, right-click the app → **Open**.
+   - Windows: [HypervisorExplorer-3.0.1-win-x64.zip](https://github.com/SuperFastMart/HyperVExplorer/releases/download/v3.0.1/HypervisorExplorer-3.0.1-win-x64.zip). **Before extracting**, run `Unblock-File .\HypervisorExplorer-3.0.1-win-x64.zip` in PowerShell, otherwise SmartScreen blocks the unsigned exe.
+   - macOS (Intel and Apple Silicon): [HypervisorExplorer-3.0.1-macos-universal.zip](https://github.com/SuperFastMart/HyperVExplorer/releases/download/v3.0.1/HypervisorExplorer-3.0.1-macos-universal.zip). After copying the app to Applications, run `xattr -dr com.apple.quarantine "/Applications/Hypervisor Explorer.app"` once, or use System Settings → Privacy & Security → **Open Anyway** after the first blocked launch.
    - All versions: [Releases](../../releases)
 2. Run `HypervisorExplorer.exe` (or **Hypervisor Explorer.app**) and click **+ Connect**, or use **View → Load demo data** to look around first.
 3. Use **Export → RVTools-compatible workbook** to produce the `.xlsx`.
@@ -100,6 +100,7 @@ Every grid, CSV, XLSX sheet and HTML table comes from the same `TableDefinition`
 
 - Saved passwords and token secrets are encrypted for your user account and never written in plain text.
 - Hyper-V credentials reach the PowerShell child process through stdin, never on the command line or in environment variables. On macOS/Linux the built-in WinRM client authenticates with NTLM and encrypts every message (HTTP) or uses TLS (HTTPS); the collection script runs on the host without the password being passed to it.
+- The builds are deliberately not code-signed. The unblock step above is the supported way to run them.
 - TLS certificate checks are skipped by default for Proxmox and ESXi, because self-signed certificates are the norm (RVTools does the same). Untick **Accept self-signed certificates**, or pass `--strict-tls`, to enforce validation.
 - Exports contain infrastructure details (hostnames, IPs, serial numbers). The `.gitignore` excludes `*.xlsx`, `*.csv` and `RVTools_*` so they don't get committed by accident.
 
