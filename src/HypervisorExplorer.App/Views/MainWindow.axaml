@@ -24,8 +24,10 @@
                             ToolTip.Tip="Connect to a Hyper-V host, Proxmox VE node, ESXi host or vCenter"/>
                     <Button Classes="tool" Content="Saved hosts" Command="{Binding ManageHostsCommand}"
                             ToolTip.Tip="Saved hosts and groups: store credentials once, connect many"/>
-                    <Button Classes="tool" Content="⟳ Refresh" Command="{Binding RefreshAllCommand}"
-                            IsEnabled="{Binding HasConnections}" ToolTip.Tip="Re-collect every connected source"/>
+                    <Button Classes="tool" Content="⟳ Refresh all" Command="{Binding RefreshAllCommand}"
+                            IsEnabled="{Binding HasConnections}" ToolTip.Tip="Re-collect every source live (snapshot sources are collected from their saved host)"/>
+                    <Button Classes="tool danger" Content="✕ Disconnect all" Command="{Binding ClearAllCommand}"
+                            IsEnabled="{Binding HasConnections}" ToolTip.Tip="Disconnect every source and clear the inventory (saved hosts are kept)"/>
                     <Rectangle Width="1" Fill="{DynamicResource PanelBorder}" Margin="6,4"/>
                     <DropDownButton Classes="tool" Content="Open">
                         <DropDownButton.Flyout>
@@ -59,7 +61,7 @@
                                     <CheckBox Content="Hide columns with no data" IsChecked="{Binding HideEmptyColumns}"/>
                                     <Separator/>
                                     <Button Classes="link" Content="Load demo data" Command="{Binding LoadDemoCommand}"/>
-                                    <Button Classes="link" Content="Clear inventory" Command="{Binding ClearAllCommand}"/>
+                                    <Button Classes="link" Content="Disconnect all" Command="{Binding ClearAllCommand}"/>
                                 </StackPanel>
                             </Flyout>
                         </DropDownButton.Flyout>

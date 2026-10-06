@@ -335,40 +335,88 @@ public sealed partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void RefreshAll()
     {
-        var items = Connections.Connections.Where(c => c.Status is ConnectionStatus.Connected or ConnectionStatus.Failed or ConnectionStatus.Cancelled).ToList();
+        var items = Connections.Connections.Where(c => !c.IsBusy && !c.IsDemo).ToList();
+        if (items.Count == 0)
+        {
+            StatusText = Connections.Connections.Count == 0 ? "Nothing to refresh — connect to a host first."
+                : Connections.Connections.All(c => c.IsDemo) ? "Demo data can't be refreshed — connect to a real host."
+                : "Everything is already collecting.";
+            return;
+        }
         RefreshItems(items);
     }
 
     [RelayCommand]
     private void Refresh(ConnectionItem? item)
     {
-        if (item is not null && item.Status != ConnectionStatus.Imported) RefreshItems([item]);
+        if (item is not null && !item.IsBusy && !item.IsDemo) RefreshItems([item]);
     }
 
     /// <summary>
-    /// Re-collects sources. Ones with usable credentials start immediately (in parallel); saved hosts that lack
-    /// them go through <see cref="ConnectSaved"/>, which prompts. Not awaited, so commands stay enabled.
+    /// Re-collects sources live. Saved hosts with usable credentials start immediately (in parallel); saved hosts
+    /// lacking them go through <see cref="ConnectSaved"/>, which prompts. Sources with no saved host (e.g. from a
+    /// snapshot of another machine) open the connect dialog pre-filled. Not awaited, so commands stay enabled.
     /// </summary>
     private void RefreshItems(IReadOnlyList<ConnectionItem> items)
     {
         var needPrompt = new List<SavedHost>();
+        var unknown = new List<ConnectionItem>();
+        var started = 0;
         foreach (var item in items)
         {
-            var request = RefreshRequest(item);
+            var saved = FindSavedHost(item);
+            var request = RefreshRequest(item, saved);
             if (ConfigStore.HasUsableCredentials(request))
+            {
                 _ = Connections.ConnectAsync(request);
-            else if (_config.Config.FindHost(item.Request.Address, item.Platform) is { } saved)
+                started++;
+            }
+            else if (saved is not null)
+            {
                 needPrompt.Add(saved);
+            }
             else
-                _ = Connections.ConnectAsync(request); // fails with a clear "credentials needed" message
+            {
+                unknown.Add(item);
+            }
         }
+        StatusText = $"Refreshing {items.Count} source(s)…";
+        Connections.Log("Refresh", $"Re-collecting {items.Count} source(s)");
         if (needPrompt.Count > 0) _ = ConnectSaved(needPrompt, includeConnected: true);
+        if (unknown.Count > 0) _ = PromptAndConnect(unknown);
     }
 
-    private ConnectionRequest RefreshRequest(ConnectionItem item)
+    /// <summary>Asks for connection details for sources that have no saved host (typically loaded from a snapshot).</summary>
+    private async Task PromptAndConnect(IReadOnlyList<ConnectionItem> items)
+    {
+        if (Dialogs is null) return;
+        foreach (var item in items)
+        {
+            var vm = new ConnectDialogViewModel(_config.Config.Groups);
+            vm.LoadFrom(item.Request with { Address = SplitAddress(item.Request.Address).Host, Port = SplitAddress(item.Request.Address).Port ?? item.Request.Port });
+            if (await Dialogs.ShowConnectDialogAsync(vm) is { } result) StartConnection(result.Request, result);
+        }
+    }
+
+    /// <summary>Snapshot sources may be keyed "host:port"; match them to saved hosts either way.</summary>
+    private SavedHost? FindSavedHost(ConnectionItem item)
+    {
+        var (host, _) = SplitAddress(item.Request.Address);
+        return _config.Config.FindHost(item.Request.Address, item.Platform) ?? _config.Config.FindHost(host, item.Platform);
+    }
+
+    private static (string Host, int? Port) SplitAddress(string address)
+    {
+        var colon = address.LastIndexOf(':');
+        return colon > 0 && address.Count(c => c == ':') == 1 && int.TryParse(address[(colon + 1)..], out var port)
+            ? (address[..colon], port)
+            : (address, null);
+    }
+
+    private ConnectionRequest RefreshRequest(ConnectionItem item, SavedHost? saved)
     {
         // Prefer freshly stored credentials (the user may have edited them since).
-        if (_config.Config.FindHost(item.Request.Address, item.Platform) is { } saved)
+        if (saved is not null)
         {
             var stored = _config.BuildRequest(saved);
             if (ConfigStore.HasUsableCredentials(stored)) return stored;
@@ -391,16 +439,18 @@ public sealed partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private async Task ClearAll()
     {
-        if (Dialogs is not null && HasData && !await Dialogs.ConfirmAsync("Clear inventory", "Disconnect all sources and clear the inventory?"))
+        if (Dialogs is not null && HasConnections && !await Dialogs.ConfirmAsync("Disconnect all",
+                $"Disconnect all {Connections.Connections.Count} source(s) and clear the inventory?\n\nSaved hosts and credentials are kept."))
             return;
         Connections.Clear();
         Details = null;
+        StatusText = "Disconnected all sources.";
     }
 
     [RelayCommand]
     private void LoadDemo()
     {
-        Connections.AddImported(SampleInventory.Create(), "Demo data");
+        Connections.AddImported(SampleInventory.Create(), ConnectionManager.DemoOrigin);
     }
 
     [RelayCommand]

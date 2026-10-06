@@ -38,6 +38,11 @@ public sealed partial class ConnectionItem : ObservableObject
 
     public bool IsBusy => Status is ConnectionStatus.Queued or ConnectionStatus.Connecting;
 
+    /// <summary>Where imported data came from (file name, or "Demo data"); null for live connections.</summary>
+    public string? Origin { get; set; }
+
+    public bool IsDemo => Origin == ConnectionManager.DemoOrigin;
+
     partial void OnStatusChanged(ConnectionStatus value) => OnPropertyChanged(nameof(IsBusy));
 
     internal CancellationTokenSource? Cts { get; set; }
@@ -64,6 +69,8 @@ public sealed class ConnectionManager
         _collectorFactory = collectorFactory ?? CollectorRegistry.Create;
         _gate = new SemaphoreSlim(Math.Max(1, maxParallel));
     }
+
+    public const string DemoOrigin = "Demo data";
 
     public ObservableCollection<ConnectionItem> Connections { get; } = [];
     public ObservableCollection<ActivityEntry> Activity { get; } = [];
@@ -110,6 +117,7 @@ public sealed class ConnectionManager
         }
 
         item.Status = ConnectionStatus.Queued;
+        item.Origin = null;
         item.Message = "Queued";
         item.Hint = null;
         item.Cts = new CancellationTokenSource();
@@ -215,6 +223,7 @@ public sealed class ConnectionManager
             var item = Find(request.Address) ?? new ConnectionItem(request);
             if (!Connections.Contains(item)) Connections.Add(item);
             item.Status = ConnectionStatus.Imported;
+            item.Origin = origin;
             item.VmCount = snap.VirtualMachines.Count;
             item.CollectedAt = snap.Source.CollectedAt;
             item.Message = $"{origin}: {snap.Hosts.Count} host(s), {snap.VirtualMachines.Count} VM(s)";
