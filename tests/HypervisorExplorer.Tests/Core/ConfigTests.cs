@@ -101,31 +101,4 @@ public class ConfigTests : IDisposable
         store.SetSecret(group, "rotated");
         Assert.Equal("rotated", store.BuildRequest(host).Secret);
     }
-
-    [Fact]
-    public void Imports_legacy_powershell_config()
-    {
-        var legacy = Path.Combine(_dir, "legacy.json");
-        Directory.CreateDirectory(_dir);
-        File.WriteAllText(legacy, """
-            {
-              "version": 3,
-              "hosts": [
-                { "address": "hv01.example.com", "type": "hyperv", "useCurrentUser": true, "lastConnected": "2025-01-01T10:00:00Z" },
-                { "address": "192.0.2.50", "type": "proxmox", "useCurrentUser": false, "username": null }
-              ],
-              "groups": [
-                { "name": "PVE Site", "type": "proxmox", "hosts": ["192.0.2.50", "192.0.2.51"], "pveAuthType": "token", "pveTokenId": "root@pam!audit" }
-              ]
-            }
-            """);
-        var store = new ConfigStore(_dir);
-        var count = store.ImportLegacy(legacy);
-        Assert.Equal(3, count);
-        var group = Assert.Single(store.Config.Groups);
-        Assert.Equal(CredentialKind.ApiToken, group.CredentialKind);
-        Assert.Equal("root@pam!audit", group.Username);
-        Assert.Equal(2, store.Config.Hosts.Count(h => h.GroupId == group.Id));
-        Assert.Equal(CredentialKind.CurrentUser, store.Config.FindHost("hv01.example.com", Platform.HyperV)!.CredentialKind);
-    }
 }

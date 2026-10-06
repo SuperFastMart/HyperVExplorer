@@ -63,24 +63,6 @@ public sealed class SecretProtector : ISecretProtector
     private static string UnprotectDpapi(string b64) =>
         Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(b64), Entropy, DataProtectionScope.CurrentUser));
 
-    /// <summary>
-    /// Decrypts a legacy PowerShell <c>ConvertFrom-SecureString</c> value (hex DPAPI blob, no entropy, UTF-16).
-    /// </summary>
-    public static string? UnprotectLegacySecureString(string hex)
-    {
-        if (!OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(hex)) return null;
-        try
-        {
-            var bytes = Convert.FromHexString(hex.Trim());
-            var plain = ProtectedData.Unprotect(bytes, null, DataProtectionScope.CurrentUser);
-            return Encoding.Unicode.GetString(plain);
-        }
-        catch (Exception ex) when (ex is CryptographicException or FormatException)
-        {
-            return null;
-        }
-    }
-
     private string ProtectAes(string plaintext)
     {
         var key = GetOrCreateKey();

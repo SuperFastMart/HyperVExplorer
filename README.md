@@ -13,7 +13,7 @@ Inventory for a mixed hypervisor estate. Connect to **Microsoft Hyper-V** (inclu
   - CSV of the current filtered table, or every table as a zip
   - A single-file HTML estate report
   - JSON inventory snapshots you can reopen later without reconnecting
-- **Saved hosts and groups.** Credentials are encrypted per user: DPAPI on Windows, AES-GCM elsewhere. A group, such as a site or cluster, can supply shared credentials to all its hosts, and you can connect a whole group in one click. Hosts and groups can be imported from the old PowerShell *Hyper-V Explorer v2*.
+- **Saved hosts and groups.** Credentials are encrypted per user: DPAPI on Windows, AES-GCM elsewhere. A group, such as a site or cluster, can supply shared credentials to all its hosts, and you can connect a whole group in one click.
 - **Background collection.** Several sources are collected in parallel with live progress and an activity log. The window never freezes.
 - **Health checks.** Old snapshots, low datastore space, guest tools not running, mounted ISOs, cluster nodes that aren't Up, CSVs in redirected access, and more.
 - **CLI.** `hvexplorer` collects and exports headlessly, for Task Scheduler or cron.

@@ -35,7 +35,7 @@ public sealed partial class SavedHostItem : ObservableObject
         {
             CredentialKind.CurrentUser => "Current user",
             CredentialKind.ApiToken => $"Token {Host.Username}",
-            CredentialKind.UsernamePassword => Host.Username + (Host.ProtectedSecret is null ? " (no password saved)" : ""),
+            CredentialKind.UsernamePassword => Host.Username + (Host.ProtectedSecret is null ? " (no password)" : ""),
             null when group is not null => $"From group: {group.Username ?? group.CredentialKind.ToString()}",
             _ => "Prompt",
         };
@@ -257,26 +257,5 @@ public sealed partial class HostsViewModel : ObservableObject
         }
         await _connect(members);
         Status = $"Queued {members.Count} host(s) from '{group.Name}'.";
-    }
-
-    [RelayCommand]
-    private async Task ImportLegacy()
-    {
-        var path = ConfigStore.LegacyConfigPath();
-        if (!File.Exists(path))
-        {
-            path = await _dialogs.PickOpenFileAsync("Legacy Hyper-V Explorer config.json", ["json"]) ?? "";
-            if (path.Length == 0) return;
-        }
-        try
-        {
-            var n = _config.ImportLegacy(path);
-            Status = $"Imported {n} host(s) and {_config.Config.Groups.Count} group(s) from {path}.";
-            Reload();
-        }
-        catch (Exception ex)
-        {
-            Status = "Import failed: " + ex.Message;
-        }
     }
 }

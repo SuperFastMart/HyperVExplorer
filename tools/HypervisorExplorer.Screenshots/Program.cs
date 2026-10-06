@@ -74,4 +74,20 @@ dialog.Show();
 Save(dialog, "07-connect-vmware");
 dialog.Close();
 
+var store = new ConfigStore(configDir);
+store.Config.Groups.Add(new HostGroup { Name = "Manchester", Username = "root@pam" });
+foreach (var (addr, platform) in new[] { ("192.0.2.50", HypervisorExplorer.Core.Model.Platform.Proxmox), ("vcenter.example.com", HypervisorExplorer.Core.Model.Platform.VMware), ("hv-node01.example.com", HypervisorExplorer.Core.Model.Platform.HyperV) })
+{
+    store.Config.Hosts.Add(new SavedHost
+    {
+        Address = addr, Platform = platform, Username = "root", LastConnected = DateTimeOffset.Now,
+        CredentialKind = HypervisorExplorer.Core.Collection.CredentialKind.UsernamePassword,
+        GroupId = platform == HypervisorExplorer.Core.Model.Platform.Proxmox ? store.Config.Groups[0].Id : null,
+    });
+}
+var hosts = new HostsWindow { DataContext = new HostsViewModel(store, window, _ => Task.CompletedTask) };
+hosts.Show();
+Save(hosts, "08-saved-hosts");
+hosts.Close();
+
 Directory.Delete(configDir, true);
