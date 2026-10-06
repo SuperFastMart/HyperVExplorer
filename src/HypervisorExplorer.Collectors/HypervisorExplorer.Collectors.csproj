@@ -2,4 +2,7 @@
   <ItemGroup>
     <ProjectReference Include="..\HypervisorExplorer.Core\HypervisorExplorer.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="HyperV\Scripts\*.ps1" />
+  </ItemGroup>
 </Project>
