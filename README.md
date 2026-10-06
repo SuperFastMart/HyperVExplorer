@@ -28,12 +28,38 @@ Inventory for a mixed hypervisor estate. Connect to **Microsoft Hyper-V** (inclu
 
 ## Getting started
 
-1. Download the latest release (**v3.0.1**) and unzip it. Nothing needs installing: it's a self-contained .NET 10 build.
-   - Windows: [HypervisorExplorer-3.0.1-win-x64.zip](https://github.com/SuperFastMart/HyperVisorExplorer/releases/download/v3.0.1/HypervisorExplorer-3.0.1-win-x64.zip). **Before extracting**, run `Unblock-File .\HypervisorExplorer-3.0.1-win-x64.zip` in PowerShell, otherwise SmartScreen blocks the unsigned exe.
-   - macOS (Intel and Apple Silicon): [HypervisorExplorer-3.0.1-macos-universal.zip](https://github.com/SuperFastMart/HyperVisorExplorer/releases/download/v3.0.1/HypervisorExplorer-3.0.1-macos-universal.zip). After copying the app to Applications, run `xattr -dr com.apple.quarantine "/Applications/Hypervisor Explorer.app"` once, or use System Settings → Privacy & Security → **Open Anyway** after the first blocked launch.
-   - All versions: [Releases](../../releases)
-2. Run `HypervisorExplorer.exe` (or **Hypervisor Explorer.app**) and click **+ Connect**, or use **View → Load demo data** to look around first.
-3. Use **Export → RVTools-compatible workbook** to produce the `.xlsx`.
+### Install (recommended): one line
+
+The builds are deliberately unsigned. These installers download with PowerShell or `curl`, so the app isn't blocked by SmartScreen or Gatekeeper, and no admin rights are needed. Run the same line again to update.
+
+**Windows** (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/SuperFastMart/HyperVisorExplorer/main/install.ps1 | iex
+```
+
+This installs to `%LOCALAPPDATA%\Programs\HypervisorExplorer`, adds a Start menu shortcut, and puts `hvexplorer` on your PATH.
+
+**macOS**, Intel and Apple Silicon (Terminal):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SuperFastMart/HyperVisorExplorer/main/install.sh | bash
+```
+
+This installs `Hypervisor Explorer.app` to Applications and `hvexplorer` to `~/.local/bin`.
+
+Once installed, the app checks for new releases and offers **⬆ Update to x.y.z**. That button runs the same installer, then reopens the app.
+
+### Install manually
+
+Download the zip for your platform from the [latest release](https://github.com/SuperFastMart/HyperVisorExplorer/releases/latest), then:
+
+- **Windows:** run `Unblock-File .\HypervisorExplorer-<version>-win-x64.zip` in PowerShell **before** extracting. Otherwise SmartScreen blocks the unsigned exe, and managed laptops have no "Run anyway" option. Then extract and run `HypervisorExplorer.exe`.
+- **macOS:** unzip, move the app to Applications, and run `xattr -dr com.apple.quarantine "/Applications/Hypervisor Explorer.app"` once. Alternatively, after the first blocked launch, go to System Settings → Privacy & Security → **Open Anyway**.
+
+### First run
+
+Click **+ Connect**, or use **View → Load demo data** to look around first. To produce the `.xlsx`, use **Export → RVTools-compatible workbook**.
 
 The app also runs natively on macOS (one download for Intel and Apple Silicon Macs) and Linux, with the same features: VMware, Proxmox and Hyper-V can all be collected from a Mac. On macOS, sign in to Hyper-V with `DOMAIN\user` and a password; integrated Windows sign-in is only available on Windows.
 
